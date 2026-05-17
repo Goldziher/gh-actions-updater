@@ -204,10 +204,55 @@ jobs:
           GH_TOKEN: ${{ secrets.HOMEBREW_TOKEN }}
         run: |
           set -euo pipefail
+          title="Bottle gh-actions-updater ${{ needs.meta.outputs.tag }}"
           gh workflow run bottle.yml \
             --repo Goldziher/homebrew-tap \
             -f formula=gh-actions-updater \
-            -f tag="${{ needs.meta.outputs.tag }}"
+            -f tag="${{ needs.meta.outputs.tag }}" \
+            -f release_repo="${{ github.repository }}"
+
+          run_id=""
+          for _ in {1..30}; do
+            run_id="$(
+              gh run list \
+                --repo Goldziher/homebrew-tap \
+                --workflow bottle.yml \
+                --limit 20 \
+                --json databaseId,displayTitle \
+                --jq ".[] | select(.displayTitle == \"$title\") | .databaseId" \
+                | head -n 1
+            )"
+            if [ -n "$run_id" ]; then
+              break
+            fi
+            sleep 10
+          done
+
+          if [ -z "$run_id" ]; then
+            echo "timed out waiting for dispatched bottle workflow to appear" >&2
+            exit 1
+          fi
+
+          run_url="$(gh run view "$run_id" --repo Goldziher/homebrew-tap --json url --jq .url)"
+          echo "Watching bottle workflow: $run_url"
+          while true; do
+            state="$(
+              gh run view "$run_id" \
+                --repo Goldziher/homebrew-tap \
+                --json status,conclusion \
+                --jq '"\(.status) \(.conclusion // "")"'
+            )"
+            status="${state%% *}"
+            conclusion="${state#* }"
+            if [ "$status" = "completed" ]; then
+              if [ "$conclusion" = "success" ]; then
+                exit 0
+              fi
+              echo "bottle workflow failed with conclusion: $conclusion" >&2
+              exit 1
+            fi
+            sleep 30
+          done
 
   publish_crates:
     name: Publish crates.io
