@@ -73,10 +73,25 @@ jobs:
 
 #[test]
 fn latest_hash_flag_is_supported() {
+    let temp = tempfile::tempdir().unwrap();
+    let workflow = temp.path().join(".github/workflows/ci.yml");
+    fs::create_dir_all(workflow.parent().unwrap()).unwrap();
+    fs::write(
+        &workflow,
+        r#"
+jobs:
+  test:
+    steps:
+      - uses: ./.github/actions/local
+"#,
+    )
+    .unwrap();
+
     let output = Command::new(binary())
         .arg("--latest-hash")
         .arg("--no-cache")
         .arg("--no-schema-validation")
+        .arg(temp.path())
         .output()
         .unwrap();
     assert!(output.status.success());

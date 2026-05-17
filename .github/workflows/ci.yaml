@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "20"
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Check Rust formatting
+        run: cargo fmt --all --check
+
+      - name: Check Rust targets
+        run: cargo check --locked --all-targets --all-features
+
+      - name: Run clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Run Rust tests
+        run: cargo test --locked --all-targets --all-features
+
+      - name: Check cargo package
+        run: cargo package --locked
+
+      - name: Check npm wrapper syntax and package contents
+        run: |
+          set -euo pipefail
+          node --check npm-package/index.js
+          node --check npm-package/install.js
+          node --check npm-package/bin/gh-actions-updater
+          export npm_config_cache="${RUNNER_TEMP}/npm-cache"
+          cd npm-package
+          npm pack --dry-run
+
+      - name: Check Python wrapper syntax and package build
+        run: |
+          set -euo pipefail
+          python -m compileall -q pip-package/gh_actions_updater
+          python -m pip install --upgrade pip build
+          python -m build pip-package --outdir "${RUNNER_TEMP}/pip-dist"
+
+      - name: Smoke scan repository workflows
+        run: cargo run --locked -- --no-cache --no-schema-validation --format json .github
+
+  actionlint:
+    name: GitHub Actions lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: "1.26"
+
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+      - name: Run actionlint
+        run: actionlint
+
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+
+      - name: Run tests
+        run: cargo test --locked --all-targets --all-features
+
+  release-config:
+    name: Release config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Check GoReleaser config
+        uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8 # v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: check

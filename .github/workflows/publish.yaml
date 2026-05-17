@@ -211,8 +211,8 @@ jobs:
 
   publish_crates:
     name: Publish crates.io
-    needs: meta
-    if: needs.meta.outputs.crates_exists != 'true'
+    needs: [meta, release_assets]
+    if: always() && needs.meta.result == 'success' && needs.meta.outputs.crates_exists != 'true' && (needs.release_assets.result == 'success' || needs.release_assets.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

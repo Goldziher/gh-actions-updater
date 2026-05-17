@@ -26,6 +26,18 @@ pub struct RemoteTag {
 pub trait TagProvider {
     fn fetch_tags(&self, owner: &str, repo: &str, etag: Option<&str>) -> Result<TagFetch>;
 
+    fn fetch_branch(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _branch: &str,
+        _etag: Option<&str>,
+    ) -> Result<BranchFetch> {
+        Err(anyhow!(
+            "branch metadata lookup is not supported by this provider"
+        ))
+    }
+
     fn fetch_commit(
         &self,
         _owner: &str,
@@ -54,6 +66,12 @@ pub enum CommitFetch {
     NotModified,
 }
 
+#[derive(Debug, Clone)]
+pub enum BranchFetch {
+    Fresh { exists: bool, etag: Option<String> },
+    NotModified,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct TagCacheValue {
     provider: String,
@@ -70,6 +88,16 @@ struct CommitCacheValue {
     auth_fingerprint: String,
     etag: Option<String>,
     sha: String,
+    exists: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct BranchCacheValue {
+    provider: String,
+    api_host: String,
+    auth_fingerprint: String,
+    etag: Option<String>,
+    branch: String,
     exists: bool,
 }
 
@@ -176,6 +204,63 @@ impl TagProvider for GitHubRestProvider {
         })
     }
 
+    fn fetch_branch(
+        &self,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+        etag: Option<&str>,
+    ) -> Result<BranchFetch> {
+        let encoded_branch = branch.replace('/', "%2F");
+        let url = format!(
+            "{}/repos/{owner}/{repo}/branches/{encoded_branch}",
+            self.api_url
+        );
+        let mut request = ureq::get(&url)
+            .header("Accept", "application/vnd.github+json")
+            .header(
+                "User-Agent",
+                concat!("gh-actions-updater/", env!("CARGO_PKG_VERSION")),
+            );
+        if let Some(token) = &self.token {
+            request = request.header("Authorization", format!("Bearer {token}"));
+        }
+        if let Some(etag) = etag {
+            request = request.header("If-None-Match", etag);
+        }
+
+        match request.call() {
+            Ok(response) if response.status() == 304 => Ok(BranchFetch::NotModified),
+            Ok(response) => Ok(BranchFetch::Fresh {
+                exists: true,
+                etag: response
+                    .headers()
+                    .get("etag")
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_string),
+            }),
+            Err(ureq::Error::StatusCode(304)) => Ok(BranchFetch::NotModified),
+            Err(ureq::Error::StatusCode(404)) => Ok(BranchFetch::Fresh {
+                exists: false,
+                etag: None,
+            }),
+            Err(error) => {
+                let Some(fallback) = &self.fallback else {
+                    return Err(error).with_context(|| {
+                        format!("GitHub REST branch lookup failed for {owner}/{repo}@{branch}")
+                    });
+                };
+                fallback
+                    .fetch_branch(owner, repo, branch, None)
+                    .with_context(|| {
+                        format!(
+                            "GitHub REST branch lookup failed for {owner}/{repo}@{branch}: {error}"
+                        )
+                    })
+            }
+        }
+    }
+
     fn fetch_commit(
         &self,
         owner: &str,
@@ -238,6 +323,33 @@ impl TagProvider for GitLsRemoteProvider {
 
         Ok(TagFetch::Fresh {
             tags: parse_ls_remote_tags(&String::from_utf8_lossy(&output.stdout))?,
+            etag: None,
+        })
+    }
+
+    fn fetch_branch(
+        &self,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+        _etag: Option<&str>,
+    ) -> Result<BranchFetch> {
+        let url = format!("https://github.com/{owner}/{repo}.git");
+        let reference = format!("refs/heads/{branch}");
+        let output = Command::new("git")
+            .args(["ls-remote", "--heads", &url, &reference])
+            .output()
+            .with_context(|| format!("failed to run git ls-remote for {owner}/{repo}"))?;
+
+        if !output.status.success() {
+            return Err(anyhow!(
+                "git ls-remote failed for {owner}/{repo}: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+
+        Ok(BranchFetch::Fresh {
+            exists: !output.stdout.is_empty(),
             etag: None,
         })
     }
@@ -316,7 +428,7 @@ pub fn resolve_updates_with_provider(
         let decision = if settings.latest_hash {
             select_hash_update_target(settings, &mut cache, provider, reference, current, tags)?
         } else {
-            select_tag_update_target(settings, current, tags)
+            select_tag_update_target(settings, &mut cache, provider, reference, current, tags)?
         };
         let Some(target) = decision.target else {
             if decision.current_missing {
@@ -530,9 +642,106 @@ fn load_commit_exists(
     Ok(exists)
 }
 
+fn load_branch_exists(
+    settings: &Settings,
+    cache: &mut CacheState,
+    provider: &impl TagProvider,
+    owner: &str,
+    repo: &str,
+    branch: &str,
+) -> Result<LookupLoad<bool>> {
+    let auth_fingerprint = auth_fingerprint(settings.github_token.as_deref());
+    let lookup_mode = format!("branch:{branch}");
+    let key = cache_key(CacheKeyParts {
+        api_host: &settings.github_api_url,
+        owner,
+        repo,
+        lookup_mode: &lookup_mode,
+        auth_fingerprint: &auth_fingerprint,
+    });
+
+    match cache.read_json::<BranchCacheValue>(&key)? {
+        CacheLookup::Fresh(value) => {
+            return Ok(LookupLoad {
+                value: value.exists,
+                warning: None,
+            });
+        }
+        CacheLookup::Stale(value) => {
+            match provider.fetch_branch(owner, repo, branch, value.etag.as_deref()) {
+                Ok(BranchFetch::Fresh { exists, etag }) => {
+                    cache.write_json(
+                        &key,
+                        &BranchCacheValue {
+                            provider: "github-rest-or-fallback".to_string(),
+                            api_host: settings.github_api_url.clone(),
+                            auth_fingerprint: auth_fingerprint.clone(),
+                            etag,
+                            branch: branch.to_string(),
+                            exists,
+                        },
+                    )?;
+                    return Ok(LookupLoad {
+                        value: exists,
+                        warning: None,
+                    });
+                }
+                Ok(BranchFetch::NotModified) => {
+                    cache.write_json(&key, &value)?;
+                    return Ok(LookupLoad {
+                        value: value.exists,
+                        warning: None,
+                    });
+                }
+                Err(error) if !settings.check && !settings.update => {
+                    return Ok(LookupLoad {
+                        value: value.exists,
+                        warning: Some(format!(
+                            "using stale branch metadata for {owner}/{repo}@{branch} after refresh failed: {error}"
+                        )),
+                    });
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        CacheLookup::Corrupt => {}
+        CacheLookup::Miss => {}
+    }
+
+    let (exists, etag) = match provider.fetch_branch(owner, repo, branch, None)? {
+        BranchFetch::Fresh { exists, etag } => (exists, etag),
+        BranchFetch::NotModified => {
+            return Err(anyhow!(
+                "metadata provider returned not-modified for {owner}/{repo}@{branch} without cached branch metadata"
+            ));
+        }
+    };
+    cache.write_json(
+        &key,
+        &BranchCacheValue {
+            provider: "github-rest-or-fallback".to_string(),
+            api_host: settings.github_api_url.clone(),
+            auth_fingerprint,
+            etag,
+            branch: branch.to_string(),
+            exists,
+        },
+    )?;
+    Ok(LookupLoad {
+        value: exists,
+        warning: None,
+    })
+}
+
 #[derive(Debug, Clone)]
 struct TagLoad {
     tags: Vec<RemoteTag>,
+    warning: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct LookupLoad<T> {
+    value: T,
     warning: Option<String>,
 }
 
@@ -568,32 +777,53 @@ struct TargetDecision {
 
 fn select_tag_update_target(
     settings: &Settings,
+    cache: &mut CacheState,
+    provider: &impl TagProvider,
+    reference: &ReferenceReport,
     current: &str,
     tags: &[RemoteTag],
-) -> TargetDecision {
+) -> Result<TargetDecision> {
     let Some(current_version) = parse_version_tag(current) else {
-        return TargetDecision {
+        return Ok(TargetDecision {
             target: None,
             current_missing: false,
             diagnostic: None,
-        };
+        });
     };
     let current_exists = tags.iter().any(|tag| tag.name == current);
-    if !current_exists && settings.missing_ref != MissingRefPolicy::Fallback {
-        return TargetDecision {
-            target: None,
-            current_missing: true,
-            diagnostic: None,
-        };
+    if !current_exists {
+        let branch_exists = load_branch_exists(
+            settings,
+            cache,
+            provider,
+            reference.parsed.owner.as_deref().unwrap_or_default(),
+            reference.parsed.repo.as_deref().unwrap_or_default(),
+            current,
+        )?;
+        if branch_exists.value {
+            return Ok(TargetDecision {
+                target: None,
+                current_missing: false,
+                diagnostic: branch_exists.warning,
+            });
+        }
+
+        if settings.missing_ref != MissingRefPolicy::Fallback {
+            return Ok(TargetDecision {
+                target: None,
+                current_missing: true,
+                diagnostic: branch_exists.warning,
+            });
+        }
     }
 
     let target = latest_semver_tag(settings, tags, Some(current_version.major));
 
-    TargetDecision {
+    Ok(TargetDecision {
         target,
         current_missing: !current_exists,
         diagnostic: None,
-    }
+    })
 }
 
 fn select_hash_update_target(
@@ -606,7 +836,8 @@ fn select_hash_update_target(
 ) -> Result<TargetDecision> {
     match reference.parsed.ref_kind {
         RefKind::SemverLikeTag => {
-            let mut decision = select_tag_update_target(settings, current, tags);
+            let mut decision =
+                select_tag_update_target(settings, cache, provider, reference, current, tags)?;
             if decision
                 .target
                 .as_ref()
@@ -778,7 +1009,7 @@ fn next_link(link_header: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CommitFetch, MetadataResolution, RemoteTag, TagFetch, TagProvider,
+        BranchFetch, CommitFetch, MetadataResolution, RemoteTag, TagFetch, TagProvider,
         exit_code_for_resolution, parse_ls_remote_tags, resolve_updates_with_provider,
     };
     use crate::cache::{CacheKeyParts, CacheState, cache_key};
@@ -813,6 +1044,19 @@ mod tests {
                 etag: Some("etag-test".to_string()),
             })
         }
+
+        fn fetch_branch(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            _branch: &str,
+            _etag: Option<&str>,
+        ) -> Result<BranchFetch> {
+            Ok(BranchFetch::Fresh {
+                exists: false,
+                etag: Some("etag-branch".to_string()),
+            })
+        }
     }
 
     impl TagProvider for FailingProvider {
@@ -842,6 +1086,37 @@ mod tests {
             Ok(CommitFetch::Fresh {
                 exists: self.commit_exists,
                 etag: Some("etag-commit".to_string()),
+            })
+        }
+    }
+
+    struct BranchCheckingProvider {
+        tags: Vec<RemoteTag>,
+        branch_exists: bool,
+        tag_calls: Cell<usize>,
+        branch_calls: Cell<usize>,
+    }
+
+    impl TagProvider for BranchCheckingProvider {
+        fn fetch_tags(&self, _owner: &str, _repo: &str, _etag: Option<&str>) -> Result<TagFetch> {
+            self.tag_calls.set(self.tag_calls.get() + 1);
+            Ok(TagFetch::Fresh {
+                tags: self.tags.clone(),
+                etag: Some("etag-tags".to_string()),
+            })
+        }
+
+        fn fetch_branch(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            _branch: &str,
+            _etag: Option<&str>,
+        ) -> Result<BranchFetch> {
+            self.branch_calls.set(self.branch_calls.get() + 1);
+            Ok(BranchFetch::Fresh {
+                exists: self.branch_exists,
+                etag: Some("etag-branch".to_string()),
             })
         }
     }
@@ -1169,6 +1444,30 @@ mod tests {
 
         assert!(resolution.updates.is_empty());
         assert_eq!(resolution.diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn branch_backed_semver_ref_is_not_reported_missing() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = settings(temp.path());
+        let provider = BranchCheckingProvider {
+            tags: vec![tag("v1.2.0")],
+            branch_exists: true,
+            tag_calls: Cell::new(0),
+            branch_calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("ruby/setup-ruby@v1")],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(resolution.updates.is_empty());
+        assert!(resolution.diagnostics.is_empty());
+        assert_eq!(provider.branch_calls.get(), 1);
     }
 
     #[test]
