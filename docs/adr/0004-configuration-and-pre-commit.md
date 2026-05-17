@@ -27,7 +27,7 @@ Initial config sections:
 
 - `[scan]`: `include`, `exclude`
 - `[cache]`: `enabled`, `ttl`, `dir`
-- `[update]`: `mode`, `include_prereleases`, `preserve_major`
+- `[update]`: `mode`, `include_prereleases`, `preserve_major`, `missing_ref`
 - `[github]`: `api_url`
 - `[output]`: `format`, `color`
 

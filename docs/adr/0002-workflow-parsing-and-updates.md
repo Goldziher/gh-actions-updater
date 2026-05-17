@@ -1,32 +1,52 @@
-# ADR 0002: Workflow Parsing And Update Semantics
+# ADR 0002: GitHub Actions File Parsing And Update Semantics
 
 Status: Accepted for v0.1.0 implementation
 
 ## Context
 
-GitHub Actions workflow files are YAML, but the hot path is finding `uses:`
-references. The tool should scan quickly while still preserving files when
-updates are eventually written.
+GitHub Actions workflow and action metadata files are YAML, but the hot path is
+finding `uses:` references. The tool should scan quickly while still preserving
+files when updates are eventually written.
 
 ## Decision
 
-The default scan set is `.github/**/*.yml` and `.github/**/*.yaml`. Users may
-add paths or glob patterns through CLI flags and config.
+The default scan set covers workflow files and action metadata files:
+
+- `.github/workflows/**/*.yml`
+- `.github/workflows/**/*.yaml`
+- `.github/actions/**/action.yml`
+- `.github/actions/**/action.yaml`
+- `action.yml`
+- `action.yaml`
+
+Users may add paths or glob patterns through CLI flags and config.
 
 The scanner will use a SIMD-friendly byte prefilter for `uses:` lines before
-performing structured parsing. Workflow YAML will be validated with a vendored
-copy of the SchemaStore GitHub workflow schema:
+performing structured parsing.
+
+Workflow YAML will be validated with a vendored copy of the SchemaStore GitHub
+workflow schema:
 
 ```text
 https://json.schemastore.org/github-workflow.json
 ```
 
+Action metadata YAML will be validated with a vendored copy of the SchemaStore
+GitHub action metadata schema:
+
+```text
+https://json.schemastore.org/github-action.json
+```
+
 Schema diagnostics are non-fatal by default, fatal with `--strict-schema`, and
 skipped with `--no-schema-validation`.
 
-The SchemaStore `github-action.json` schema applies to action metadata files
-such as `action.yml` and `action.yaml`; it is not used as the workflow schema in
-v0.1.0.
+Supported `uses:` locations:
+
+- workflow step actions: `jobs.<job_id>.steps[*].uses`
+- reusable workflow calls: `jobs.<job_id>.uses`
+- composite action step actions: `runs.steps[*].uses` when
+  `runs.using = "composite"`
 
 Remote GitHub action references have this shape:
 
@@ -34,10 +54,14 @@ Remote GitHub action references have this shape:
 owner/repo[/path]@ref
 ```
 
+Reusable workflow references use the same remote reference grammar, usually with
+`.github/workflows/<file>.yml` or `.yaml` in the path.
+
 Supported classifications:
 
-- remote GitHub actions: update candidates
+- remote GitHub actions and reusable workflows: update candidates
 - local actions: reported as non-updatable
+- local reusable workflows: reported as non-updatable
 - Docker image actions: reported as non-updatable
 - malformed refs: reported as parse diagnostics
 
@@ -49,8 +73,20 @@ Update semantics:
 - branch refs are reported but not updated by default
 - SHA refs are reported but not updated by default
 - non-semver tag sets are reported but not updated by default
+- deleted or missing remote refs are controlled by the missing-ref policy
 - `--latest-hash` selects the same tag as latest-tag mode, then pins the commit
   SHA behind that tag
+
+Missing-ref policy values:
+
+- `warn`: report the missing tag or SHA and continue
+- `error`: fail check/update runs when the current ref no longer exists
+- `ignore`: suppress missing-ref diagnostics
+- `fallback`: select the normal update target and allow `--update` to rewrite
+  to it
+
+The default is `warn`. The updater must not silently rewrite a deleted tag unless
+the effective policy is `fallback`.
 
 When file rewriting is implemented, the updater will use span-based replacement
 of only the `@ref` substring in simple scalar `uses:` values. It must not

@@ -3,9 +3,10 @@
 Version: `0.1.0`
 
 `gh-actions-updater` is a Rust 2024 CLI for finding and updating GitHub Actions
-references in repository workflow files. The v0.1.0 surface is designed around
-fast local and pre-commit use: scan `.github/` YAML files, resolve available tag
-updates with a cache, and only perform heavier commit-hash lookup when requested.
+references in repository workflow and action metadata files. The v0.1.0 surface
+is designed around fast local and pre-commit use: scan GitHub Actions YAML,
+resolve available tag updates with a cache, and only perform heavier
+commit-hash lookup when requested.
 
 This README defines the intended v0.1.0 CLI contract. Implementation is being
 built iteratively.
@@ -14,14 +15,17 @@ built iteratively.
 
 By default, the tool:
 
-- scans `.github/**/*.yml` and `.github/**/*.yaml`
-- reports remote GitHub action references from `uses:` entries
+- scans `.github/workflows/**/*.yml` and `.github/workflows/**/*.yaml`
+- scans repository `action.yml` and `action.yaml` files
+- scans `.github/actions/**/action.yml` and `.github/actions/**/action.yaml`
+- reports remote action and reusable workflow references from supported `uses:`
+  entries
 - checks latest tag metadata when cache entries are stale
 - uses the global cache unless disabled
 - does not rewrite workflow files unless `--update` is passed
 
-Local actions such as `./.github/actions/build` and Docker image references are
-reported as non-updatable.
+Local actions such as `./.github/actions/build`, Docker image references, and
+local reusable workflow calls are reported as non-updatable.
 
 ## Usage
 
@@ -30,7 +34,14 @@ gh-actions-updater [OPTIONS] [PATHS]...
 ```
 
 `PATHS` may be files, directories, or glob patterns. When no paths are supplied,
-the default scan set is `.github/**/*.yml` and `.github/**/*.yaml`.
+the default scan set is:
+
+- `.github/workflows/**/*.yml`
+- `.github/workflows/**/*.yaml`
+- `.github/actions/**/action.yml`
+- `.github/actions/**/action.yaml`
+- `action.yml`
+- `action.yaml`
 
 ## CLI Flags
 
@@ -45,6 +56,7 @@ the default scan set is `.github/**/*.yml` and `.github/**/*.yaml`.
 | `--no-cache` | Disable cache reads and writes for this run. |
 | `--update` | Rewrite supported workflow refs to the selected target version. |
 | `--latest-hash` | Resolve update targets to commit SHAs instead of latest tags. |
+| `--missing-ref <warn\|error\|ignore\|fallback>` | Behavior when the current remote tag or SHA no longer exists. |
 | `--check` | Exit non-zero when updates are available. Does not rewrite files. |
 | `--dry-run` | Show planned changes without writing files. Implied when `--update` is absent. |
 | `--diff` | Show unified diffs for proposed workflow updates. |
@@ -70,7 +82,14 @@ current directory, walks up to the repository root, and stops at the first match
 
 ```toml
 [scan]
-include = [".github/**/*.yml", ".github/**/*.yaml"]
+include = [
+  ".github/workflows/**/*.yml",
+  ".github/workflows/**/*.yaml",
+  ".github/actions/**/action.yml",
+  ".github/actions/**/action.yaml",
+  "action.yml",
+  "action.yaml",
+]
 exclude = []
 
 [cache]
@@ -81,6 +100,7 @@ ttl = "6h"
 mode = "latest-tag"
 include_prereleases = false
 preserve_major = true
+missing_ref = "warn"
 
 [output]
 format = "human"
@@ -106,13 +126,37 @@ Supported environment variables:
 
 The default update mode is `latest-tag`.
 
+Supported `uses:` locations:
+
+- workflow step actions: `jobs.<job_id>.steps[*].uses`
+- reusable workflow calls: `jobs.<job_id>.uses`
+- composite action step actions: `runs.steps[*].uses` when
+  `runs.using = "composite"`
 - `owner/repo@v4` updates within the same major tag line when semver-like tags
   are available.
 - `owner/repo@v4.1.0` updates within the same major version.
+- reusable workflows such as
+  `owner/repo/.github/workflows/reusable.yml@v1` follow the same tag/hash
+  update policy as actions.
 - prerelease tags are ignored unless configured.
 - branch refs such as `@main` are reported but not updated by default.
 - immutable 40-character SHA refs are reported but not updated by default.
 - non-semver tag sets are reported but not updated by default.
+
+Deleted or missing refs are handled separately from normal update checks. The
+default `missing_ref = "warn"` reports the missing ref but does not rewrite it.
+
+Missing-ref policies:
+
+| Policy | Behavior |
+| --- | --- |
+| `warn` | Report the missing tag or SHA and continue. |
+| `error` | Treat the missing ref as a failure; exits `1` in `--check`, otherwise exits `4`. |
+| `ignore` | Suppress missing-ref diagnostics for intentionally unavailable refs. |
+| `fallback` | Select the normal update target and allow `--update` to rewrite to it. |
+
+The updater must not silently rewrite a deleted tag unless the effective policy
+is `fallback`.
 
 `--latest-hash` first selects the same tag that latest-tag mode would select,
 then pins the workflow to the commit SHA behind that selected tag. It does not
@@ -120,22 +164,26 @@ jump to the action repository default branch. It is intended for users who
 prefer immutable CI dependencies while keeping the same version-selection
 policy.
 
-## Workflow Schema
+## Schemas
 
-Workflow YAML is validated against the SchemaStore GitHub workflow schema:
+Workflow files are validated against the SchemaStore GitHub workflow schema:
 
 ```text
 https://json.schemastore.org/github-workflow.json
 ```
 
-The schema is vendored into release builds so normal scans do not depend on
-network access. Schema diagnostics are reported with the file diagnostics by
-default. `--strict-schema` turns those diagnostics into exit code `3`, while
-`--no-schema-validation` skips schema validation and only scans `uses:` refs.
+Action metadata files are validated against the SchemaStore GitHub action
+metadata schema:
 
-The related SchemaStore `github-action.json` schema describes action metadata
-files such as `action.yml` and `action.yaml`. That schema is reserved for a
-later local-action metadata feature and is not the workflow scan schema.
+```text
+https://json.schemastore.org/github-action.json
+```
+
+The schema is vendored into release builds so normal scans do not depend on
+network access. Schema diagnostics are reported with file diagnostics by
+default. `--strict-schema` turns schema diagnostics into exit code `3`, while
+`--no-schema-validation` skips schema validation and only scans supported
+`uses:` refs.
 
 ## Cache And Metadata
 

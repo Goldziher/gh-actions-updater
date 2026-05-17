@@ -26,6 +26,7 @@ Supported flags:
 - `--no-cache`
 - `--update`
 - `--latest-hash`
+- `--missing-ref <warn|error|ignore|fallback>`
 - `--check`
 - `--dry-run`
 - `--diff`
