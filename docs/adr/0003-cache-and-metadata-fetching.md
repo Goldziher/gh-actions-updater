@@ -42,14 +42,17 @@ Cache keys use `blake3` over:
 - relevant auth identity fingerprint
 
 Latest-tag cached values include the metadata provider, API host, auth
-fingerprint, tag lists, ETags, and timestamps. Hash-mode cache values will add
-selected commit metadata when hash resolution is implemented.
+fingerprint, tag lists, ETags, and timestamps. Hash-mode cache values add
+per-SHA commit-existence metadata when the current SHA cannot be matched to a
+fetched tag.
 
 Metadata fetching strategy:
 
 - latest-tag mode fetches tag metadata only
-- hash mode is reserved; it will fetch tag metadata, select the target tag, and
-  fetch the commit behind that tag
+- hash mode fetches tag metadata, selects the target tag, and uses the selected
+  tag's commit SHA as the update target
+- hash mode fetches per-SHA commit metadata only when the current ref is a SHA
+  that does not match any fetched semver tag
 - full history is never fetched for tag-only checks
 - repositories are never cloned
 - GitHub REST API with conditional ETag requests is the default metadata source

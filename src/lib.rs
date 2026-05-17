@@ -24,7 +24,6 @@ pub fn run() -> Result<()> {
             std::process::exit(2);
         }
     };
-    validate_supported_iteration(&settings);
     let cache = match cache::CacheState::prepare(&settings).context("failed to prepare cache") {
         Ok(cache) => cache,
         Err(error) => {
@@ -100,19 +99,4 @@ pub fn run() -> Result<()> {
     }
 
     Ok(())
-}
-
-fn validate_supported_iteration(settings: &config::Settings) {
-    let mut unsupported = Vec::new();
-    if settings.latest_hash {
-        unsupported.push("--latest-hash");
-    }
-
-    if !unsupported.is_empty() {
-        eprintln!(
-            "unsupported in this scanner iteration: {}",
-            unsupported.join(", ")
-        );
-        std::process::exit(2);
-    }
 }

@@ -47,7 +47,7 @@ The hook contract is:
 - `stages: [pre-commit]`
 
 When cache TTL expires, the hook may refresh cheap tag metadata. Commit-hash
-lookups are reserved for the later `--latest-hash` iteration.
+lookups are enabled only when users opt into `--latest-hash`.
 
 ## Consequences
 

@@ -9,9 +9,8 @@ resolve available tag updates with a cache, and only perform heavier
 commit-hash lookup when requested.
 
 This README defines the intended v0.1.0 CLI contract. The current
-implementation supports scan, latest-tag resolution, cache-backed metadata,
-schema diagnostics, safe tag updates, and diffs. `--latest-hash` is reserved
-for the next hash-resolution iteration and currently exits `2`.
+implementation supports scan, latest-tag and latest-hash resolution,
+cache-backed metadata, schema diagnostics, safe updates, and diffs.
 
 ## Default Behavior
 
@@ -57,7 +56,7 @@ the default scan set is:
 | `--refresh-cache` | Ignore existing cache entries and write fresh metadata after fetching. |
 | `--no-cache` | Disable cache reads and writes for this run. |
 | `--update` | Rewrite supported workflow refs to the selected target version. |
-| `--latest-hash` | Reserved: resolve update targets to commit SHAs instead of latest tags. Currently exits `2`. |
+| `--latest-hash` | Resolve update targets to commit SHAs instead of latest tags. |
 | `--missing-ref <warn\|error\|ignore\|fallback>` | Behavior when the current remote tag or SHA no longer exists. |
 | `--check` | Exit non-zero when updates are available. Does not rewrite files. |
 | `--dry-run` | Show planned changes without writing files. Implied when `--update` is absent. |
@@ -146,7 +145,8 @@ Supported `uses:` locations:
 
 Deleted or missing tag refs are handled separately from normal update checks.
 The default `missing_ref = "warn"` reports the missing tag but does not rewrite
-it. SHA existence checks are part of the later hash-resolution iteration.
+it. In `--latest-hash` mode, unmatched SHA refs are checked through cached
+commit metadata before the missing-ref policy is applied.
 
 Missing-ref policies:
 
@@ -160,9 +160,12 @@ Missing-ref policies:
 The updater must not silently rewrite a deleted tag unless the effective policy
 is `fallback`.
 
-The reserved `--latest-hash` mode will first select the same tag that latest-tag
-mode would select, then pin the workflow to the commit SHA behind that selected
-tag. It will not jump to the action repository default branch.
+The `--latest-hash` mode first selects the same tag that latest-tag mode would
+select, then pins the workflow to the commit SHA behind that selected tag. It
+does not jump to the action repository default branch. When the current ref is
+already a SHA, the resolver preserves the major version if that SHA matches a
+known semver tag. If the SHA does not map to a semver tag, `preserve_major =
+false` is required before the resolver can select the latest semver tag.
 
 ## Schemas
 
@@ -198,8 +201,8 @@ The default cache directory is the platform cache directory with
 Cache entries are keyed with `blake3` over the GitHub host, action repository,
 lookup mode, and relevant request identity. Latest-tag cache data includes the
 metadata provider, API host, auth fingerprint, tag lists, ETags, and fetch
-timestamps. Hash-mode cache entries will add selected commit metadata when that
-mode is implemented.
+timestamps. Hash-mode cache entries add per-SHA commit-existence metadata when
+the current SHA cannot be matched to a fetched tag.
 
 Cache flags are exact:
 
@@ -278,7 +281,7 @@ repos:
 
 The hook uses `--check` and does not mutate files unless users pass
 `--update`. When cache TTL expires, it may refresh cheap tag metadata.
-Commit-hash resolution is reserved for the later `--latest-hash` iteration.
+Commit-hash resolution is enabled only when `--latest-hash` is passed.
 
 The hook contract is:
 

@@ -25,7 +25,7 @@ Supported flags:
 - `--refresh-cache`
 - `--no-cache`
 - `--update`
-- `--latest-hash` (reserved for the hash-resolution iteration; currently exits `2`)
+- `--latest-hash`
 - `--missing-ref <warn|error|ignore|fallback>`
 - `--check`
 - `--dry-run`

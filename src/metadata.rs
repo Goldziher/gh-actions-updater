@@ -1,4 +1,4 @@
-use crate::action_ref::ReferenceKind;
+use crate::action_ref::{RefKind, ReferenceKind};
 use crate::cache::{CacheKeyParts, CacheLookup, CacheReport, CacheState, cache_key};
 use crate::cli::MissingRefPolicy;
 use crate::config::Settings;
@@ -25,6 +25,18 @@ pub struct RemoteTag {
 
 pub trait TagProvider {
     fn fetch_tags(&self, owner: &str, repo: &str, etag: Option<&str>) -> Result<TagFetch>;
+
+    fn fetch_commit(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _sha: &str,
+        _etag: Option<&str>,
+    ) -> Result<CommitFetch> {
+        Err(anyhow!(
+            "commit metadata lookup is not supported by this provider"
+        ))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -36,6 +48,12 @@ pub enum TagFetch {
     NotModified,
 }
 
+#[derive(Debug, Clone)]
+pub enum CommitFetch {
+    Fresh { exists: bool, etag: Option<String> },
+    NotModified,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct TagCacheValue {
     provider: String,
@@ -43,6 +61,16 @@ struct TagCacheValue {
     auth_fingerprint: String,
     etag: Option<String>,
     tags: Vec<RemoteTag>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct CommitCacheValue {
+    provider: String,
+    api_host: String,
+    auth_fingerprint: String,
+    etag: Option<String>,
+    sha: String,
+    exists: bool,
 }
 
 pub struct GitHubRestProvider {
@@ -147,6 +175,48 @@ impl TagProvider for GitHubRestProvider {
             etag: response_etag,
         })
     }
+
+    fn fetch_commit(
+        &self,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+        etag: Option<&str>,
+    ) -> Result<CommitFetch> {
+        let url = format!("{}/repos/{owner}/{repo}/commits/{sha}", self.api_url);
+        let mut request = ureq::get(&url)
+            .header("Accept", "application/vnd.github+json")
+            .header(
+                "User-Agent",
+                concat!("gh-actions-updater/", env!("CARGO_PKG_VERSION")),
+            );
+        if let Some(token) = &self.token {
+            request = request.header("Authorization", format!("Bearer {token}"));
+        }
+        if let Some(etag) = etag {
+            request = request.header("If-None-Match", etag);
+        }
+
+        match request.call() {
+            Ok(response) if response.status() == 304 => Ok(CommitFetch::NotModified),
+            Ok(response) => Ok(CommitFetch::Fresh {
+                exists: true,
+                etag: response
+                    .headers()
+                    .get("etag")
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_string),
+            }),
+            Err(ureq::Error::StatusCode(304)) => Ok(CommitFetch::NotModified),
+            Err(ureq::Error::StatusCode(404)) => Ok(CommitFetch::Fresh {
+                exists: false,
+                etag: None,
+            }),
+            Err(error) => Err(error).with_context(|| {
+                format!("GitHub REST commit lookup failed for {owner}/{repo}@{sha}")
+            }),
+        }
+    }
 }
 
 pub struct GitLsRemoteProvider;
@@ -155,7 +225,7 @@ impl TagProvider for GitLsRemoteProvider {
     fn fetch_tags(&self, owner: &str, repo: &str, _etag: Option<&str>) -> Result<TagFetch> {
         let url = format!("https://github.com/{owner}/{repo}.git");
         let output = Command::new("git")
-            .args(["ls-remote", "--tags", "--refs", &url])
+            .args(["ls-remote", "--tags", &url])
             .output()
             .with_context(|| format!("failed to run git ls-remote for {owner}/{repo}"))?;
 
@@ -212,6 +282,18 @@ pub fn resolve_updates_with_provider(
             continue;
         };
 
+        let update_candidate = if settings.latest_hash {
+            matches!(
+                reference.parsed.ref_kind,
+                RefKind::SemverLikeTag | RefKind::Sha
+            )
+        } else {
+            reference.parsed.updatable
+        };
+        if !update_candidate {
+            continue;
+        }
+
         let repo_key = (owner.to_string(), repo.to_string());
         if !tags_by_repo.contains_key(&repo_key) {
             let tags = load_tags(settings, &mut cache, provider, owner, repo)?;
@@ -230,30 +312,51 @@ pub fn resolve_updates_with_provider(
             });
         }
 
-        if !reference.parsed.updatable {
-            continue;
-        }
-
         let tags = &tag_load.tags;
-        let decision = select_update_target(settings, current, tags);
+        let decision = if settings.latest_hash {
+            select_hash_update_target(settings, &mut cache, provider, reference, current, tags)?
+        } else {
+            select_tag_update_target(settings, current, tags)
+        };
         let Some(target) = decision.target else {
             if decision.current_missing {
                 handle_missing_ref(settings, reference, &mut diagnostics)?;
             }
+            if let Some(message) = decision.diagnostic {
+                diagnostics.push(Diagnostic {
+                    file: reference.file.clone(),
+                    line: Some(reference.line),
+                    message,
+                    category: DiagnosticCategory::General,
+                });
+            }
             continue;
         };
 
-        if target.name != current
+        let target_ref = if settings.latest_hash {
+            target.sha
+        } else {
+            target.name
+        };
+
+        if target_ref != current
             && (!decision.current_missing || settings.missing_ref == MissingRefPolicy::Fallback)
         {
             updates.push(UpdateReport {
                 file: reference.file.clone(),
                 line: reference.line,
                 current: current.to_string(),
-                target: Some(target.name),
+                target: Some(target_ref),
                 ref_span: reference.ref_span,
                 rewrite_supported: reference.rewrite_supported,
                 rewrite_reason: reference.rewrite_reason.clone(),
+            });
+        } else if let Some(message) = decision.diagnostic {
+            diagnostics.push(Diagnostic {
+                file: reference.file.clone(),
+                line: Some(reference.line),
+                message,
+                category: DiagnosticCategory::General,
             });
         }
     }
@@ -273,11 +376,16 @@ fn load_tags(
     repo: &str,
 ) -> Result<TagLoad> {
     let auth_fingerprint = auth_fingerprint(settings.github_token.as_deref());
+    let lookup_mode = if settings.latest_hash {
+        "tags-commit-sha-v2"
+    } else {
+        "tags"
+    };
     let key = cache_key(CacheKeyParts {
         api_host: &settings.github_api_url,
         owner,
         repo,
-        lookup_mode: "tags",
+        lookup_mode,
         auth_fingerprint: &auth_fingerprint,
     });
 
@@ -352,6 +460,76 @@ fn load_tags(
     })
 }
 
+fn load_commit_exists(
+    settings: &Settings,
+    cache: &mut CacheState,
+    provider: &impl TagProvider,
+    owner: &str,
+    repo: &str,
+    sha: &str,
+) -> Result<bool> {
+    let auth_fingerprint = auth_fingerprint(settings.github_token.as_deref());
+    let lookup_mode = format!("commit:{sha}");
+    let key = cache_key(CacheKeyParts {
+        api_host: &settings.github_api_url,
+        owner,
+        repo,
+        lookup_mode: &lookup_mode,
+        auth_fingerprint: &auth_fingerprint,
+    });
+
+    match cache.read_json::<CommitCacheValue>(&key)? {
+        CacheLookup::Fresh(value) => return Ok(value.exists),
+        CacheLookup::Stale(value) => {
+            match provider.fetch_commit(owner, repo, sha, value.etag.as_deref()) {
+                Ok(CommitFetch::Fresh { exists, etag }) => {
+                    cache.write_json(
+                        &key,
+                        &CommitCacheValue {
+                            provider: "github-rest".to_string(),
+                            api_host: settings.github_api_url.clone(),
+                            auth_fingerprint: auth_fingerprint.clone(),
+                            etag,
+                            sha: sha.to_string(),
+                            exists,
+                        },
+                    )?;
+                    return Ok(exists);
+                }
+                Ok(CommitFetch::NotModified) => {
+                    cache.write_json(&key, &value)?;
+                    return Ok(value.exists);
+                }
+                Err(_error) if !settings.check && !settings.update => return Ok(value.exists),
+                Err(error) => return Err(error),
+            }
+        }
+        CacheLookup::Corrupt => {}
+        CacheLookup::Miss => {}
+    }
+
+    let (exists, etag) = match provider.fetch_commit(owner, repo, sha, None)? {
+        CommitFetch::Fresh { exists, etag } => (exists, etag),
+        CommitFetch::NotModified => {
+            return Err(anyhow!(
+                "metadata provider returned not-modified for {owner}/{repo}@{sha} without cached commit metadata"
+            ));
+        }
+    };
+    cache.write_json(
+        &key,
+        &CommitCacheValue {
+            provider: "github-rest".to_string(),
+            api_host: settings.github_api_url.clone(),
+            auth_fingerprint,
+            etag,
+            sha: sha.to_string(),
+            exists,
+        },
+    )?;
+    Ok(exists)
+}
+
 #[derive(Debug, Clone)]
 struct TagLoad {
     tags: Vec<RemoteTag>,
@@ -385,13 +563,19 @@ fn handle_missing_ref(
 struct TargetDecision {
     target: Option<RemoteTag>,
     current_missing: bool,
+    diagnostic: Option<String>,
 }
 
-fn select_update_target(settings: &Settings, current: &str, tags: &[RemoteTag]) -> TargetDecision {
+fn select_tag_update_target(
+    settings: &Settings,
+    current: &str,
+    tags: &[RemoteTag],
+) -> TargetDecision {
     let Some(current_version) = parse_version_tag(current) else {
         return TargetDecision {
             target: None,
             current_missing: false,
+            diagnostic: None,
         };
     };
     let current_exists = tags.iter().any(|tag| tag.name == current);
@@ -399,21 +583,112 @@ fn select_update_target(settings: &Settings, current: &str, tags: &[RemoteTag]) 
         return TargetDecision {
             target: None,
             current_missing: true,
+            diagnostic: None,
         };
     }
 
-    let target = tags
-        .iter()
-        .filter_map(|tag| parse_version_tag(&tag.name).map(|version| (tag, version)))
-        .filter(|(_, version)| !settings.preserve_major || version.major == current_version.major)
-        .filter(|(_, version)| settings.include_prereleases || version.pre.is_empty())
-        .max_by(|(_, left), (_, right)| left.cmp(right))
-        .map(|(tag, _)| tag.clone());
+    let target = latest_semver_tag(settings, tags, Some(current_version.major));
 
     TargetDecision {
         target,
         current_missing: !current_exists,
+        diagnostic: None,
     }
+}
+
+fn select_hash_update_target(
+    settings: &Settings,
+    cache: &mut CacheState,
+    provider: &impl TagProvider,
+    reference: &ReferenceReport,
+    current: &str,
+    tags: &[RemoteTag],
+) -> Result<TargetDecision> {
+    match reference.parsed.ref_kind {
+        RefKind::SemverLikeTag => {
+            let mut decision = select_tag_update_target(settings, current, tags);
+            if decision
+                .target
+                .as_ref()
+                .is_some_and(|target| target.sha.is_empty())
+            {
+                let name = decision
+                    .target
+                    .as_ref()
+                    .map(|target| target.name.clone())
+                    .unwrap_or_default();
+                decision.target = None;
+                decision.diagnostic =
+                    Some(format!("selected tag has no commit SHA metadata: {name}"));
+            }
+            Ok(decision)
+        }
+        RefKind::Sha => {
+            let current_tag_version = tags
+                .iter()
+                .filter(|tag| tag.sha.eq_ignore_ascii_case(current))
+                .filter_map(|tag| parse_version_tag(&tag.name))
+                .filter(|version| settings.include_prereleases || version.pre.is_empty())
+                .max();
+
+            let current_exists = if current_tag_version.is_some() {
+                true
+            } else {
+                load_commit_exists(
+                    settings,
+                    cache,
+                    provider,
+                    reference.parsed.owner.as_deref().unwrap_or_default(),
+                    reference.parsed.repo.as_deref().unwrap_or_default(),
+                    current,
+                )?
+            };
+
+            if !current_exists && settings.missing_ref != MissingRefPolicy::Fallback {
+                return Ok(TargetDecision {
+                    target: None,
+                    current_missing: true,
+                    diagnostic: None,
+                });
+            }
+
+            if settings.preserve_major && current_tag_version.is_none() {
+                return Ok(TargetDecision {
+                    target: None,
+                    current_missing: !current_exists,
+                    diagnostic: Some(format!(
+                        "cannot infer semver major for pinned SHA {}; use preserve_major = false to allow latest-hash updates",
+                        current
+                    )),
+                });
+            }
+
+            let major = current_tag_version.map(|version| version.major);
+            Ok(TargetDecision {
+                target: latest_semver_tag(settings, tags, major),
+                current_missing: !current_exists,
+                diagnostic: None,
+            })
+        }
+        _ => Ok(TargetDecision {
+            target: None,
+            current_missing: false,
+            diagnostic: None,
+        }),
+    }
+}
+
+fn latest_semver_tag(
+    settings: &Settings,
+    tags: &[RemoteTag],
+    major: Option<u64>,
+) -> Option<RemoteTag> {
+    tags.iter()
+        .filter_map(|tag| parse_version_tag(&tag.name).map(|version| (tag, version)))
+        .filter(|(_, version)| major.is_none_or(|major| version.major == major))
+        .filter(|(_, version)| settings.include_prereleases || version.pre.is_empty())
+        .max_by(|(_, left), (_, right)| left.cmp(right))
+        .map(|(tag, _)| tag.clone())
 }
 
 pub fn exit_code_for_resolution(
@@ -458,19 +733,29 @@ fn auth_fingerprint(token: Option<&str>) -> String {
 }
 
 fn parse_ls_remote_tags(output: &str) -> Result<Vec<RemoteTag>> {
-    let mut tags = Vec::new();
+    let mut tags_by_name: AHashMap<String, RemoteTag> = AHashMap::new();
     for line in output.lines() {
         let Some((sha, reference)) = line.split_once(char::is_whitespace) else {
             continue;
         };
-        let Some(name) = reference.trim().strip_prefix("refs/tags/") else {
+        let Some(raw_name) = reference.trim().strip_prefix("refs/tags/") else {
             continue;
         };
-        tags.push(RemoteTag {
-            name: name.to_string(),
-            sha: sha.to_string(),
-        });
+        let (name, peeled) = raw_name
+            .strip_suffix("^{}")
+            .map_or((raw_name, false), |name| (name, true));
+        if peeled || !tags_by_name.contains_key(name) {
+            tags_by_name.insert(
+                name.to_string(),
+                RemoteTag {
+                    name: name.to_string(),
+                    sha: sha.to_string(),
+                },
+            );
+        }
     }
+    let mut tags = tags_by_name.into_values().collect::<Vec<_>>();
+    tags.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(tags)
 }
 
@@ -493,8 +778,8 @@ fn next_link(link_header: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        MetadataResolution, RemoteTag, TagFetch, TagProvider, exit_code_for_resolution,
-        parse_ls_remote_tags, resolve_updates_with_provider,
+        CommitFetch, MetadataResolution, RemoteTag, TagFetch, TagProvider,
+        exit_code_for_resolution, parse_ls_remote_tags, resolve_updates_with_provider,
     };
     use crate::cache::{CacheKeyParts, CacheState, cache_key};
     use crate::cli::{ColorChoice, MissingRefPolicy, OutputFormat};
@@ -513,6 +798,13 @@ mod tests {
         calls: Cell<usize>,
     }
 
+    struct CommitCheckingProvider {
+        tags: Vec<RemoteTag>,
+        commit_exists: bool,
+        tag_calls: Cell<usize>,
+        commit_calls: Cell<usize>,
+    }
+
     impl TagProvider for FakeProvider {
         fn fetch_tags(&self, _owner: &str, _repo: &str, _etag: Option<&str>) -> Result<TagFetch> {
             self.calls.set(self.calls.get() + 1);
@@ -527,6 +819,30 @@ mod tests {
         fn fetch_tags(&self, _owner: &str, _repo: &str, _etag: Option<&str>) -> Result<TagFetch> {
             self.calls.set(self.calls.get() + 1);
             anyhow::bail!("network unavailable")
+        }
+    }
+
+    impl TagProvider for CommitCheckingProvider {
+        fn fetch_tags(&self, _owner: &str, _repo: &str, _etag: Option<&str>) -> Result<TagFetch> {
+            self.tag_calls.set(self.tag_calls.get() + 1);
+            Ok(TagFetch::Fresh {
+                tags: self.tags.clone(),
+                etag: Some("etag-tags".to_string()),
+            })
+        }
+
+        fn fetch_commit(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            _sha: &str,
+            _etag: Option<&str>,
+        ) -> Result<CommitFetch> {
+            self.commit_calls.set(self.commit_calls.get() + 1);
+            Ok(CommitFetch::Fresh {
+                exists: self.commit_exists,
+                etag: Some("etag-commit".to_string()),
+            })
         }
     }
 
@@ -599,6 +915,118 @@ mod tests {
         assert_eq!(resolution.updates.len(), 1);
         assert_eq!(resolution.updates[0].target.as_deref(), Some("v4.1.0"));
         assert_eq!(provider.calls.get(), 1);
+    }
+
+    #[test]
+    fn skips_non_candidate_refs_before_metadata_fetch() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = settings(temp.path());
+        let provider = FakeProvider {
+            tags: vec![tag("v4")],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("actions/checkout@main")],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(resolution.updates.is_empty());
+        assert_eq!(provider.calls.get(), 0);
+    }
+
+    #[test]
+    fn latest_hash_pins_selected_tag_sha() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.latest_hash = true;
+        let provider = FakeProvider {
+            tags: vec![
+                tag_with_sha("v4", "1111111111111111111111111111111111111111"),
+                tag_with_sha("v4.2.0", "2222222222222222222222222222222222222222"),
+            ],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("actions/checkout@v4")],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolution.updates[0].target.as_deref(),
+            Some("2222222222222222222222222222222222222222")
+        );
+    }
+
+    #[test]
+    fn latest_hash_updates_sha_by_matching_tag_major() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.latest_hash = true;
+        let provider = FakeProvider {
+            tags: vec![
+                tag_with_sha("v4", "1111111111111111111111111111111111111111"),
+                tag_with_sha("v4.2.0", "2222222222222222222222222222222222222222"),
+                tag_with_sha("v5", "5555555555555555555555555555555555555555"),
+            ],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference(
+                "actions/checkout@1111111111111111111111111111111111111111",
+            )],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolution.updates[0].target.as_deref(),
+            Some("2222222222222222222222222222222222222222")
+        );
+    }
+
+    #[test]
+    fn latest_hash_checks_unmatched_sha_and_requires_major_opt_out() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.latest_hash = true;
+        let provider = CommitCheckingProvider {
+            tags: vec![tag_with_sha(
+                "v4.2.0",
+                "2222222222222222222222222222222222222222",
+            )],
+            commit_exists: true,
+            tag_calls: Cell::new(0),
+            commit_calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference(
+                "actions/checkout@9999999999999999999999999999999999999999",
+            )],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(resolution.updates.is_empty());
+        assert_eq!(provider.commit_calls.get(), 1);
+        assert!(
+            resolution.diagnostics[0]
+                .message
+                .contains("cannot infer semver major")
+        );
     }
 
     #[test]
@@ -823,6 +1251,17 @@ mod tests {
                 tag_with_sha("v1.2.0", "def456")
             ]
         );
+    }
+
+    #[test]
+    fn parses_peeled_annotated_tag_commits() {
+        let tags = parse_ls_remote_tags(
+            "tag-object\trefs/tags/v1\n\
+             commit-sha\trefs/tags/v1^{}\n",
+        )
+        .unwrap();
+
+        assert_eq!(tags, vec![tag_with_sha("v1", "commit-sha")]);
     }
 
     fn tag_with_sha(name: &str, sha: &str) -> RemoteTag {

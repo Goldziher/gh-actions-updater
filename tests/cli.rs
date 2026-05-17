@@ -72,12 +72,12 @@ jobs:
 }
 
 #[test]
-fn unsupported_latest_hash_flag_exits_two() {
+fn latest_hash_flag_is_supported() {
     let output = Command::new(binary())
         .arg("--latest-hash")
+        .arg("--no-cache")
+        .arg("--no-schema-validation")
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(2));
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.contains("unsupported in this scanner iteration"));
+    assert!(output.status.success());
 }

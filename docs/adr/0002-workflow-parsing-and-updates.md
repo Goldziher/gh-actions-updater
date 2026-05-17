@@ -74,8 +74,8 @@ Update semantics:
 - SHA refs are reported but not updated by default
 - non-semver tag sets are reported but not updated by default
 - deleted or missing remote tag refs are controlled by the missing-ref policy
-- `--latest-hash` is reserved for the hash-resolution iteration; it will select
-  the same tag as latest-tag mode, then pin the commit SHA behind that tag
+- `--latest-hash` selects the same tag as latest-tag mode, then pins the commit
+  SHA behind that tag
 
 Missing-ref policy values:
 
@@ -86,9 +86,12 @@ Missing-ref policy values:
   to it
 
 The default is `warn`. The latest-tag resolver enforces this policy for tag refs
-only; SHA existence checks are part of the hash-resolution iteration. The
-updater must not silently rewrite a deleted tag unless the effective policy is
-`fallback`.
+only. The latest-hash resolver checks unmatched SHA refs through commit
+metadata, and SHA refs that map to known semver tags preserve their major
+version. SHA refs that do not map to a known semver tag require
+`preserve_major = false` before the resolver can select the latest semver tag.
+The updater must not silently rewrite a deleted tag unless the effective policy
+is `fallback`.
 
 File rewriting uses span-based replacement of only the `@ref` substring in
 simple scalar `uses:` values. It must not round-trip or normalize the whole YAML
