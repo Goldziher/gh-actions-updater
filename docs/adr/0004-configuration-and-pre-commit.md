@@ -5,7 +5,7 @@ Status: Accepted for v0.1.0 implementation
 ## Context
 
 Users need repo-local defaults, while automation needs stable override behavior.
-The project also publishes a user-facing pre-commit.com hook, which is separate
+The project also publishes a user-facing pre-commit hook, which is separate
 from this repository's own development pre-commit configuration.
 
 ## Decision
@@ -46,8 +46,8 @@ The hook contract is:
 - `pass_filenames: false`
 - `stages: [pre-commit]`
 
-When cache TTL expires, the hook may refresh cheap tag metadata. It performs
-commit-hash lookups only when `--latest-hash` is configured.
+When cache TTL expires, the hook may refresh cheap tag metadata. Commit-hash
+lookups are reserved for the later `--latest-hash` iteration.
 
 ## Consequences
 

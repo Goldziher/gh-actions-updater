@@ -18,6 +18,7 @@ pub struct RunReport {
     pub updates: Vec<UpdateReport>,
     pub diagnostics: Vec<Diagnostic>,
     pub cache: CacheReport,
+    pub diffs: Vec<String>,
 
     #[serde(skip)]
     format: OutputFormat,
@@ -40,6 +41,12 @@ pub struct UpdateReport {
     pub line: usize,
     pub current: String,
     pub target: Option<String>,
+    #[serde(skip)]
+    pub ref_span: Option<crate::scanner::ByteSpan>,
+    #[serde(skip)]
+    pub rewrite_supported: bool,
+    #[serde(skip)]
+    pub rewrite_reason: Option<String>,
 }
 
 impl RunReport {
@@ -79,10 +86,17 @@ impl RunReport {
                 diagnostics
             },
             cache: resolution.cache,
+            diffs: Vec::new(),
             format: settings.format,
             quiet: settings.quiet,
             verbose: settings.verbose,
         }
+    }
+
+    pub fn set_rewrite_result(&mut self, result: crate::rewrite::RewriteResult) {
+        self.changed = result.changed;
+        self.diagnostics.extend(result.diagnostics);
+        self.diffs = result.diffs;
     }
 
     pub fn write(&self, stdout: &mut impl Write, stderr: &mut impl Write) -> Result<()> {
@@ -120,6 +134,10 @@ impl RunReport {
                             "update {}:{} {} -> {}",
                             update.file, update.line, update.current, target
                         )?;
+                    }
+
+                    for diff in &self.diffs {
+                        writeln!(stdout, "{diff}")?;
                     }
                 }
             }

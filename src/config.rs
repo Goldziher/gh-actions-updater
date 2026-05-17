@@ -35,6 +35,7 @@ pub struct Settings {
     pub verbose: bool,
     pub color: ColorChoice,
     pub github_token_present: bool,
+    pub github_token: Option<String>,
     pub github_api_url: String,
     pub strict_schema: bool,
     pub schema_validation: bool,
@@ -112,9 +113,7 @@ impl Settings {
         let file_config = load_config(cli.config.as_deref())?;
 
         let paths = cli.paths.clone();
-        let include = if !cli.include.is_empty() {
-            cli.include.clone()
-        } else if let Some(include) = file_config.scan.include {
+        let mut include = if let Some(include) = file_config.scan.include {
             include
         } else {
             DEFAULT_INCLUDES
@@ -122,6 +121,7 @@ impl Settings {
                 .map(|value| value.to_string())
                 .collect()
         };
+        include.extend(cli.include.iter().cloned());
 
         let exclude = if !cli.exclude.is_empty() {
             cli.exclude.clone()
@@ -150,10 +150,13 @@ impl Settings {
             file_config.update.mode.unwrap_or(UpdateMode::LatestTag)
         };
 
-        let github_token_present = cli.github_token.is_some()
-            || env::var_os("GHAU_GITHUB_TOKEN").is_some()
-            || env::var_os("GITHUB_TOKEN").is_some()
-            || env::var_os("GH_TOKEN").is_some();
+        let github_token = cli
+            .github_token
+            .clone()
+            .or_else(|| env::var("GHAU_GITHUB_TOKEN").ok())
+            .or_else(|| env::var("GITHUB_TOKEN").ok())
+            .or_else(|| env::var("GH_TOKEN").ok());
+        let github_token_present = github_token.is_some();
 
         let format = if let Some(format) = cli.format {
             format
@@ -198,13 +201,14 @@ impl Settings {
             include_prereleases: file_config.update.include_prereleases.unwrap_or(false),
             preserve_major: file_config.update.preserve_major.unwrap_or(true),
             check: cli.check,
-            dry_run: cli.dry_run || !cli.update,
+            dry_run: cli.dry_run || cli.check || !cli.update,
             diff: cli.diff,
             format,
             quiet: cli.quiet,
             verbose: cli.verbose,
             color,
             github_token_present,
+            github_token,
             github_api_url: cli
                 .github_api_url
                 .clone()
@@ -304,7 +308,11 @@ mod tests {
             "never",
         ]);
         let settings = Settings::resolve(&cli).unwrap();
-        assert_eq!(settings.include, vec![".github/workflows/*.yml"]);
+        assert!(
+            settings
+                .include
+                .contains(&".github/workflows/*.yml".to_string())
+        );
         assert_eq!(settings.exclude, vec!["**/skip.yml"]);
         assert_eq!(settings.cache_ttl, CacheTtl::Seconds(0));
         assert!(!settings.cache_enabled);

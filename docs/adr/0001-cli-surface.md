@@ -25,7 +25,7 @@ Supported flags:
 - `--refresh-cache`
 - `--no-cache`
 - `--update`
-- `--latest-hash`
+- `--latest-hash` (reserved for the hash-resolution iteration; currently exits `2`)
 - `--missing-ref <warn|error|ignore|fallback>`
 - `--check`
 - `--dry-run`
@@ -46,7 +46,7 @@ Exit codes are stable:
 - `0`: success
 - `1`: updates found in `--check`
 - `2`: invalid arguments or config
-- `3`: workflow parsing failed
+- `3`: workflow parsing or strict schema validation failed
 - `4`: metadata lookup failed without usable cache
 - `5`: file rewrite failed
 
@@ -54,8 +54,8 @@ Successful `--update` exits `0`, including when files were changed. Users who
 need drift detection must use `--check`.
 
 Machine-readable JSON is written to stdout. Logs, warnings, and diagnostics not
-included in the JSON payload are written to stderr. `--diff` is human-output
-only for v0.1.0.
+included in the JSON payload are written to stderr. `--diff` prints diff text in
+human output and includes a `diffs` array in JSON output.
 
 ## Consequences
 

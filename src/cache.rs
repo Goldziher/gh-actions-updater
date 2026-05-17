@@ -97,7 +97,14 @@ impl CacheState {
             fetched_at: unix_now(),
             value,
         };
-        fs::write(&path, serde_json::to_vec(&entry)?)
+        let temp_path = self.dir.join(format!(
+            "{key}.{}.{}.json.tmp",
+            std::process::id(),
+            unix_now()
+        ));
+        fs::write(&temp_path, serde_json::to_vec(&entry)?)
+            .with_context(|| format!("failed to write cache entry {}", temp_path.display()))?;
+        fs::rename(&temp_path, &path)
             .with_context(|| format!("failed to write cache entry {}", path.display()))?;
         self.report.refreshes += 1;
         Ok(())
@@ -110,6 +117,7 @@ impl CacheState {
     fn is_fresh(&self, fetched_at: u64) -> bool {
         match self.ttl {
             CacheTtl::Never => true,
+            CacheTtl::Seconds(0) => false,
             CacheTtl::Seconds(ttl) => unix_now().saturating_sub(fetched_at) <= ttl,
         }
     }

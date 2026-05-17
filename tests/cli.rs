@@ -72,8 +72,11 @@ jobs:
 }
 
 #[test]
-fn unsupported_update_flag_exits_two() {
-    let output = Command::new(binary()).arg("--update").output().unwrap();
+fn unsupported_latest_hash_flag_exits_two() {
+    let output = Command::new(binary())
+        .arg("--latest-hash")
+        .output()
+        .unwrap();
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("unsupported in this scanner iteration"));

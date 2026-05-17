@@ -8,8 +8,10 @@ is designed around fast local and pre-commit use: scan GitHub Actions YAML,
 resolve available tag updates with a cache, and only perform heavier
 commit-hash lookup when requested.
 
-This README defines the intended v0.1.0 CLI contract. Implementation is being
-built iteratively.
+This README defines the intended v0.1.0 CLI contract. The current
+implementation supports scan, latest-tag resolution, cache-backed metadata,
+schema diagnostics, safe tag updates, and diffs. `--latest-hash` is reserved
+for the next hash-resolution iteration and currently exits `2`.
 
 ## Default Behavior
 
@@ -55,7 +57,7 @@ the default scan set is:
 | `--refresh-cache` | Ignore existing cache entries and write fresh metadata after fetching. |
 | `--no-cache` | Disable cache reads and writes for this run. |
 | `--update` | Rewrite supported workflow refs to the selected target version. |
-| `--latest-hash` | Resolve update targets to commit SHAs instead of latest tags. |
+| `--latest-hash` | Reserved: resolve update targets to commit SHAs instead of latest tags. Currently exits `2`. |
 | `--missing-ref <warn\|error\|ignore\|fallback>` | Behavior when the current remote tag or SHA no longer exists. |
 | `--check` | Exit non-zero when updates are available. Does not rewrite files. |
 | `--dry-run` | Show planned changes without writing files. Implied when `--update` is absent. |
@@ -71,8 +73,7 @@ the default scan set is:
 | `-h, --help` | Print help. |
 | `-V, --version` | Print version. |
 
-`--latest-hash` affects only update target resolution. Normal latest-tag checks
-fetch tag metadata only.
+Normal latest-tag checks fetch tag metadata only.
 
 ## Configuration
 
@@ -159,11 +160,9 @@ Missing-ref policies:
 The updater must not silently rewrite a deleted tag unless the effective policy
 is `fallback`.
 
-`--latest-hash` first selects the same tag that latest-tag mode would select,
-then pins the workflow to the commit SHA behind that selected tag. It does not
-jump to the action repository default branch. It is intended for users who
-prefer immutable CI dependencies while keeping the same version-selection
-policy.
+The reserved `--latest-hash` mode will first select the same tag that latest-tag
+mode would select, then pin the workflow to the commit SHA behind that selected
+tag. It will not jump to the action repository default branch.
 
 ## Schemas
 
@@ -197,9 +196,10 @@ The default cache directory is the platform cache directory with
 - Windows: `%LOCALAPPDATA%\gh-actions-updater`
 
 Cache entries are keyed with `blake3` over the GitHub host, action repository,
-lookup mode, and relevant request identity. Cached data includes repository
-metadata, tag lists, default branch, selected commit hashes, ETags, and fetch
-timestamps.
+lookup mode, and relevant request identity. Latest-tag cache data includes the
+metadata provider, API host, auth fingerprint, tag lists, ETags, and fetch
+timestamps. Hash-mode cache entries will add selected commit metadata when that
+mode is implemented.
 
 Cache flags are exact:
 
@@ -233,8 +233,9 @@ Human output is written to stdout. Diagnostics, warnings, and network/cache logs
 are written to stderr. `--quiet` suppresses human stdout but not errors.
 
 JSON output is written to stdout and is not suppressed by `--quiet`. Logs and
-diagnostics that are not part of the JSON payload go to stderr. `--diff` is
-only supported with `--format human` in v0.1.0.
+diagnostics that are not part of the JSON payload go to stderr. When `--diff`
+is requested, human output prints diff text and JSON output includes a `diffs`
+array.
 
 The v0.1.0 JSON shape is:
 
@@ -251,6 +252,7 @@ The v0.1.0 JSON shape is:
   "references": [],
   "updates": [],
   "diagnostics": [],
+  "diffs": [],
   "cache": {
     "enabled": true,
     "fresh_hits": 0,
@@ -263,7 +265,7 @@ The v0.1.0 JSON shape is:
 
 ## Pre-commit Hook
 
-The project will publish a `pre-commit.com` hook through `.pre-commit-hooks.yaml`.
+The project publishes a pre-commit hook through `.pre-commit-hooks.yaml`.
 The hook default is check-only:
 
 ```yaml
@@ -275,8 +277,8 @@ repos:
 ```
 
 The hook uses `--check` and does not mutate files unless users pass
-`--update`. When cache TTL expires, it may refresh cheap tag metadata. It only
-performs commit-hash resolution when `--latest-hash` is configured.
+`--update`. When cache TTL expires, it may refresh cheap tag metadata.
+Commit-hash resolution is reserved for the later `--latest-hash` iteration.
 
 The hook contract is:
 

@@ -74,8 +74,8 @@ Update semantics:
 - SHA refs are reported but not updated by default
 - non-semver tag sets are reported but not updated by default
 - deleted or missing remote tag refs are controlled by the missing-ref policy
-- `--latest-hash` selects the same tag as latest-tag mode, then pins the commit
-  SHA behind that tag
+- `--latest-hash` is reserved for the hash-resolution iteration; it will select
+  the same tag as latest-tag mode, then pin the commit SHA behind that tag
 
 Missing-ref policy values:
 
@@ -90,11 +90,10 @@ only; SHA existence checks are part of the hash-resolution iteration. The
 updater must not silently rewrite a deleted tag unless the effective policy is
 `fallback`.
 
-When file rewriting is implemented, the updater will use span-based replacement
-of only the `@ref` substring in simple scalar `uses:` values. It must not
-round-trip or normalize the whole YAML document. Multiline values, templated
-values, anchored values, and non-string values are reported as unsupported
-instead of being rewritten.
+File rewriting uses span-based replacement of only the `@ref` substring in
+simple scalar `uses:` values. It must not round-trip or normalize the whole YAML
+document. Multiline values, templated values, anchored values, and non-string
+values are reported as unsupported instead of being rewritten.
 
 ## Consequences
 

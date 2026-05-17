@@ -3,7 +3,7 @@ use crate::cache::{CacheKeyParts, CacheLookup, CacheReport, CacheState, cache_ke
 use crate::cli::MissingRefPolicy;
 use crate::config::Settings;
 use crate::report::UpdateReport;
-use crate::scanner::{Diagnostic, ReferenceReport};
+use crate::scanner::{Diagnostic, DiagnosticCategory, ReferenceReport};
 use ahash::AHashMap;
 use anyhow::{Context, Result, anyhow};
 use semver::Version;
@@ -24,13 +24,135 @@ pub struct RemoteTag {
 }
 
 pub trait TagProvider {
-    fn fetch_tags(&self, owner: &str, repo: &str) -> Result<Vec<RemoteTag>>;
+    fn fetch_tags(&self, owner: &str, repo: &str, etag: Option<&str>) -> Result<TagFetch>;
+}
+
+#[derive(Debug, Clone)]
+pub enum TagFetch {
+    Fresh {
+        tags: Vec<RemoteTag>,
+        etag: Option<String>,
+    },
+    NotModified,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct TagCacheValue {
+    provider: String,
+    api_host: String,
+    auth_fingerprint: String,
+    etag: Option<String>,
+    tags: Vec<RemoteTag>,
+}
+
+pub struct GitHubRestProvider {
+    api_url: String,
+    token: Option<String>,
+    fallback: Option<GitLsRemoteProvider>,
+}
+
+impl GitHubRestProvider {
+    pub fn new(settings: &Settings) -> Self {
+        let api_url = settings.github_api_url.trim_end_matches('/').to_string();
+        let fallback = if api_url == "https://api.github.com" && settings.github_token.is_none() {
+            Some(GitLsRemoteProvider)
+        } else {
+            None
+        };
+        Self {
+            api_url,
+            token: settings.github_token.clone(),
+            fallback,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubTag {
+    name: String,
+    commit: GitHubCommit,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubCommit {
+    sha: String,
+}
+
+impl TagProvider for GitHubRestProvider {
+    fn fetch_tags(&self, owner: &str, repo: &str, etag: Option<&str>) -> Result<TagFetch> {
+        let mut url = format!("{}/repos/{owner}/{repo}/tags?per_page=100", self.api_url);
+        let mut tags = Vec::new();
+        let mut response_etag = None;
+        let mut first_page = true;
+
+        loop {
+            let mut request = ureq::get(&url)
+                .header("Accept", "application/vnd.github+json")
+                .header(
+                    "User-Agent",
+                    concat!("gh-actions-updater/", env!("CARGO_PKG_VERSION")),
+                );
+            if let Some(token) = &self.token {
+                request = request.header("Authorization", format!("Bearer {token}"));
+            }
+            if first_page && let Some(etag) = etag {
+                request = request.header("If-None-Match", etag);
+            }
+
+            let response = match request.call() {
+                Ok(response) if response.status() == 304 => return Ok(TagFetch::NotModified),
+                Ok(response) => response,
+                Err(ureq::Error::StatusCode(304)) => return Ok(TagFetch::NotModified),
+                Err(error) => {
+                    let Some(fallback) = &self.fallback else {
+                        return Err(error).with_context(|| {
+                            format!("GitHub REST metadata lookup failed for {owner}/{repo}")
+                        });
+                    };
+                    return fallback.fetch_tags(owner, repo, None).with_context(|| {
+                        format!("GitHub REST metadata lookup failed for {owner}/{repo}: {error}")
+                    });
+                }
+            };
+            if first_page {
+                response_etag = response
+                    .headers()
+                    .get("etag")
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_string);
+            }
+            let next_url = response
+                .headers()
+                .get("link")
+                .and_then(|value| value.to_str().ok())
+                .and_then(next_link);
+            let page_tags: Vec<GitHubTag> =
+                response.into_body().read_json().with_context(|| {
+                    format!("failed to parse GitHub tags response for {owner}/{repo}")
+                })?;
+            tags.extend(page_tags.into_iter().map(|tag| RemoteTag {
+                name: tag.name,
+                sha: tag.commit.sha,
+            }));
+
+            let Some(next_url) = next_url else {
+                break;
+            };
+            url = next_url;
+            first_page = false;
+        }
+
+        Ok(TagFetch::Fresh {
+            tags,
+            etag: response_etag,
+        })
+    }
 }
 
 pub struct GitLsRemoteProvider;
 
 impl TagProvider for GitLsRemoteProvider {
-    fn fetch_tags(&self, owner: &str, repo: &str) -> Result<Vec<RemoteTag>> {
+    fn fetch_tags(&self, owner: &str, repo: &str, _etag: Option<&str>) -> Result<TagFetch> {
         let url = format!("https://github.com/{owner}/{repo}.git");
         let output = Command::new("git")
             .args(["ls-remote", "--tags", "--refs", &url])
@@ -44,7 +166,10 @@ impl TagProvider for GitLsRemoteProvider {
             ));
         }
 
-        parse_ls_remote_tags(&String::from_utf8_lossy(&output.stdout))
+        Ok(TagFetch::Fresh {
+            tags: parse_ls_remote_tags(&String::from_utf8_lossy(&output.stdout))?,
+            etag: None,
+        })
     }
 }
 
@@ -53,7 +178,12 @@ pub fn resolve_updates(
     cache: CacheState,
     references: &[ReferenceReport],
 ) -> Result<MetadataResolution> {
-    resolve_updates_with_provider(settings, cache, references, &GitLsRemoteProvider)
+    resolve_updates_with_provider(
+        settings,
+        cache,
+        references,
+        &GitHubRestProvider::new(settings),
+    )
 }
 
 pub fn resolve_updates_with_provider(
@@ -96,6 +226,7 @@ pub fn resolve_updates_with_provider(
                 file: reference.file.clone(),
                 line: Some(reference.line),
                 message: warning.clone(),
+                category: DiagnosticCategory::General,
             });
         }
 
@@ -120,6 +251,9 @@ pub fn resolve_updates_with_provider(
                 line: reference.line,
                 current: current.to_string(),
                 target: Some(target.name),
+                ref_span: reference.ref_span,
+                rewrite_supported: reference.rewrite_supported,
+                rewrite_reason: reference.rewrite_reason.clone(),
             });
         }
     }
@@ -138,45 +272,80 @@ fn load_tags(
     owner: &str,
     repo: &str,
 ) -> Result<TagLoad> {
+    let auth_fingerprint = auth_fingerprint(settings.github_token.as_deref());
     let key = cache_key(CacheKeyParts {
         api_host: &settings.github_api_url,
         owner,
         repo,
         lookup_mode: "tags",
-        auth_fingerprint: "anonymous",
+        auth_fingerprint: &auth_fingerprint,
     });
 
-    match cache.read_json::<Vec<RemoteTag>>(&key)? {
-        CacheLookup::Fresh(tags) => {
+    match cache.read_json::<TagCacheValue>(&key)? {
+        CacheLookup::Fresh(value) => {
             return Ok(TagLoad {
-                tags,
+                tags: value.tags,
                 warning: None,
             });
         }
-        CacheLookup::Stale(tags) => match provider.fetch_tags(owner, repo) {
-            Ok(fresh) => {
-                cache.write_json(&key, &fresh)?;
-                return Ok(TagLoad {
-                    tags: fresh,
-                    warning: None,
-                });
+        CacheLookup::Stale(value) => {
+            match provider.fetch_tags(owner, repo, value.etag.as_deref()) {
+                Ok(TagFetch::Fresh { tags, etag }) => {
+                    cache.write_json(
+                        &key,
+                        &TagCacheValue {
+                            provider: "github-rest-or-fallback".to_string(),
+                            api_host: settings.github_api_url.clone(),
+                            auth_fingerprint: auth_fingerprint.clone(),
+                            etag,
+                            tags: tags.clone(),
+                        },
+                    )?;
+                    return Ok(TagLoad {
+                        tags,
+                        warning: None,
+                    });
+                }
+                Ok(TagFetch::NotModified) => {
+                    cache.write_json(&key, &value)?;
+                    return Ok(TagLoad {
+                        tags: value.tags,
+                        warning: None,
+                    });
+                }
+                Err(error) if !settings.check && !settings.update => {
+                    return Ok(TagLoad {
+                        tags: value.tags,
+                        warning: Some(format!(
+                            "using stale metadata for {owner}/{repo} after refresh failed: {error}"
+                        )),
+                    });
+                }
+                Err(error) => return Err(error),
             }
-            Err(error) if !settings.check && !settings.update => {
-                return Ok(TagLoad {
-                    tags,
-                    warning: Some(format!(
-                        "using stale metadata for {owner}/{repo} after refresh failed: {error}"
-                    )),
-                });
-            }
-            Err(error) => return Err(error),
-        },
+        }
         CacheLookup::Corrupt => {}
         CacheLookup::Miss => {}
     }
 
-    let tags = provider.fetch_tags(owner, repo)?;
-    cache.write_json(&key, &tags)?;
+    let (tags, etag) = match provider.fetch_tags(owner, repo, None)? {
+        TagFetch::Fresh { tags, etag } => (tags, etag),
+        TagFetch::NotModified => {
+            return Err(anyhow!(
+                "metadata provider returned not-modified for {owner}/{repo} without cached tags"
+            ));
+        }
+    };
+    cache.write_json(
+        &key,
+        &TagCacheValue {
+            provider: "github-rest-or-fallback".to_string(),
+            api_host: settings.github_api_url.clone(),
+            auth_fingerprint,
+            etag,
+            tags: tags.clone(),
+        },
+    )?;
     Ok(TagLoad {
         tags,
         warning: None,
@@ -207,6 +376,7 @@ fn handle_missing_ref(
         file: reference.file.clone(),
         line: Some(reference.line),
         message,
+        category: DiagnosticCategory::General,
     });
     Ok(())
 }
@@ -278,6 +448,15 @@ fn parse_version_tag(tag: &str) -> Option<Version> {
     }
 }
 
+fn auth_fingerprint(token: Option<&str>) -> String {
+    let Some(token) = token else {
+        return "anonymous".to_string();
+    };
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(token.as_bytes());
+    format!("token:{}", hasher.finalize().to_hex())
+}
+
 fn parse_ls_remote_tags(output: &str) -> Result<Vec<RemoteTag>> {
     let mut tags = Vec::new();
     for line in output.lines() {
@@ -295,11 +474,27 @@ fn parse_ls_remote_tags(output: &str) -> Result<Vec<RemoteTag>> {
     Ok(tags)
 }
 
+fn next_link(link_header: &str) -> Option<String> {
+    for link in link_header.split(',') {
+        let mut parts = link.split(';').map(str::trim);
+        let Some(url) = parts.next() else {
+            continue;
+        };
+        if parts.any(|part| part == r#"rel="next""#) {
+            return url
+                .strip_prefix('<')
+                .and_then(|value| value.strip_suffix('>'))
+                .map(str::to_string);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        MetadataResolution, RemoteTag, TagProvider, exit_code_for_resolution, parse_ls_remote_tags,
-        resolve_updates_with_provider,
+        MetadataResolution, RemoteTag, TagFetch, TagProvider, exit_code_for_resolution,
+        parse_ls_remote_tags, resolve_updates_with_provider,
     };
     use crate::cache::{CacheKeyParts, CacheState, cache_key};
     use crate::cli::{ColorChoice, MissingRefPolicy, OutputFormat};
@@ -319,14 +514,17 @@ mod tests {
     }
 
     impl TagProvider for FakeProvider {
-        fn fetch_tags(&self, _owner: &str, _repo: &str) -> Result<Vec<RemoteTag>> {
+        fn fetch_tags(&self, _owner: &str, _repo: &str, _etag: Option<&str>) -> Result<TagFetch> {
             self.calls.set(self.calls.get() + 1);
-            Ok(self.tags.clone())
+            Ok(TagFetch::Fresh {
+                tags: self.tags.clone(),
+                etag: Some("etag-test".to_string()),
+            })
         }
     }
 
     impl TagProvider for FailingProvider {
-        fn fetch_tags(&self, _owner: &str, _repo: &str) -> Result<Vec<RemoteTag>> {
+        fn fetch_tags(&self, _owner: &str, _repo: &str, _etag: Option<&str>) -> Result<TagFetch> {
             self.calls.set(self.calls.get() + 1);
             anyhow::bail!("network unavailable")
         }
@@ -354,6 +552,7 @@ mod tests {
             verbose: false,
             color: ColorChoice::Auto,
             github_token_present: false,
+            github_token: None,
             github_api_url: "https://api.github.com".to_string(),
             strict_schema: false,
             schema_validation: false,
@@ -367,6 +566,9 @@ mod tests {
             column: 9,
             raw: raw.to_string(),
             parsed: crate::action_ref::parse_uses(raw),
+            ref_span: None,
+            rewrite_supported: false,
+            rewrite_reason: None,
         }
     }
 
@@ -465,7 +667,13 @@ mod tests {
             settings.cache_dir.join(format!("{key}.json")),
             serde_json::json!({
                 "fetched_at": 1,
-                "value": [tag("v4"), tag("v4.2.0")]
+                "value": {
+                    "provider": "test",
+                    "api_host": "https://api.github.com",
+                    "auth_fingerprint": "anonymous",
+                    "etag": "etag-test",
+                    "tags": [tag("v4"), tag("v4.2.0")]
+                }
             })
             .to_string(),
         )
@@ -622,6 +830,15 @@ mod tests {
             name: name.to_string(),
             sha: sha.to_string(),
         }
+    }
+
+    #[test]
+    fn extracts_next_link_from_github_header() {
+        let link = r#"<https://api.github.com/repos/o/r/tags?page=2>; rel="next", <https://api.github.com/repos/o/r/tags?page=4>; rel="last""#;
+        assert_eq!(
+            super::next_link(link).as_deref(),
+            Some("https://api.github.com/repos/o/r/tags?page=2")
+        );
     }
 
     fn tags_cache_key(owner: &str, repo: &str) -> String {

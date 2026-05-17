@@ -5,6 +5,7 @@ mod config;
 mod discover;
 mod metadata;
 mod report;
+mod rewrite;
 mod scanner;
 
 use anyhow::{Context, Result};
@@ -15,11 +16,51 @@ use std::io;
 
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
-    let settings = config::Settings::resolve(&cli).context("failed to resolve configuration")?;
-    validate_supported_iteration(&cli, &settings);
-    let cache = cache::CacheState::prepare(&settings).context("failed to prepare cache")?;
-    let files = discover::discover_files(&settings).context("failed to discover files")?;
-    let scan = scanner::scan_files(&files, &settings).context("failed to scan files")?;
+    let settings = match config::Settings::resolve(&cli).context("failed to resolve configuration")
+    {
+        Ok(settings) => settings,
+        Err(error) => {
+            eprintln!("{error:#}");
+            std::process::exit(2);
+        }
+    };
+    validate_supported_iteration(&settings);
+    let cache = match cache::CacheState::prepare(&settings).context("failed to prepare cache") {
+        Ok(cache) => cache,
+        Err(error) => {
+            eprintln!("{error:#}");
+            std::process::exit(2);
+        }
+    };
+    let files = match discover::discover_files(&settings).context("failed to discover files") {
+        Ok(files) => files,
+        Err(error) => {
+            eprintln!("{error:#}");
+            std::process::exit(3);
+        }
+    };
+    let scan = match scanner::scan_files(&files, &settings).context("failed to scan files") {
+        Ok(scan) => scan,
+        Err(error) => {
+            eprintln!("{error:#}");
+            std::process::exit(3);
+        }
+    };
+    if settings.strict_schema && scanner::has_schema_diagnostics(&scan.diagnostics) {
+        let report = RunReport::from_scan(
+            env!("CARGO_PKG_VERSION"),
+            &settings,
+            metadata::MetadataResolution {
+                updates: Vec::new(),
+                diagnostics: Vec::new(),
+                cache: cache.report.clone(),
+            },
+            files,
+            scan,
+        );
+        report.write(&mut io::stdout(), &mut io::stderr())?;
+        std::process::exit(3);
+    }
     let resolution = match metadata::resolve_updates(&settings, cache, &scan.references)
         .context("failed to resolve action metadata")
     {
@@ -30,14 +71,28 @@ pub fn run() -> Result<()> {
         }
     };
     let exit_code = metadata::exit_code_for_resolution(&settings, &resolution);
+    let rewrite_result = if settings.update || settings.diff {
+        match rewrite::apply_updates(&settings, &resolution.updates)
+            .context("failed to apply updates")
+        {
+            Ok(result) => result,
+            Err(error) => {
+                eprintln!("{error:#}");
+                std::process::exit(5);
+            }
+        }
+    } else {
+        rewrite::RewriteResult::default()
+    };
 
-    let report = RunReport::from_scan(
+    let mut report = RunReport::from_scan(
         env!("CARGO_PKG_VERSION"),
         &settings,
         resolution,
         files,
         scan,
     );
+    report.set_rewrite_result(rewrite_result);
     report.write(&mut io::stdout(), &mut io::stderr())?;
 
     if let Some(exit_code) = exit_code {
@@ -47,28 +102,10 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-fn validate_supported_iteration(cli: &Cli, settings: &config::Settings) {
+fn validate_supported_iteration(settings: &config::Settings) {
     let mut unsupported = Vec::new();
-    if settings.update {
-        unsupported.push("--update");
-    }
     if settings.latest_hash {
         unsupported.push("--latest-hash");
-    }
-    if settings.diff {
-        unsupported.push("--diff");
-    }
-    if settings.strict_schema {
-        unsupported.push("--strict-schema");
-    }
-    if cli.github_token.is_some() {
-        unsupported.push("--github-token");
-    }
-    if cli.github_api_url.is_some() {
-        unsupported.push("--github-api-url");
-    }
-    if settings.github_api_url != "https://api.github.com" {
-        unsupported.push("github.api_url");
     }
 
     if !unsupported.is_empty() {

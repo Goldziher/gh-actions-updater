@@ -162,6 +162,7 @@ mod tests {
             verbose: false,
             color: ColorChoice::Auto,
             github_token_present: false,
+            github_token: None,
             github_api_url: "https://api.github.com".to_string(),
             strict_schema: false,
             schema_validation: false,
