@@ -1,0 +1,96 @@
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
+exclude: ^(target/|fixtures/|node_modules/|npm-package/|pip-package/)
+
+repos:
+  # Commit message linting
+  - repo: https://github.com/Goldziher/gitfluff
+    rev: v0.8.0
+    hooks:
+      - id: gitfluff-lint
+        args: ["--write"]
+        stages: [commit-msg]
+
+  # AI-Rulez: auto-generate AI assistant configuration files
+  - repo: https://github.com/Goldziher/ai-rulez
+    rev: v4.1.6
+    hooks:
+      - id: ai-rulez-generate
+
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: detect-private-key
+      - id: check-json
+      - id: check-yaml
+        args: ["--allow-multiple-documents", "--unsafe"]
+      - id: check-toml
+      - id: check-case-conflict
+
+  # TOML formatting
+  - repo: https://github.com/DevinR528/cargo-sort
+    rev: "v2.1.4"
+    hooks:
+      - id: cargo-sort
+        args: [-w]
+
+  - repo: https://github.com/ComPWA/taplo-pre-commit
+    rev: v0.9.3
+    hooks:
+      - id: taplo-format
+        exclude: "Cargo.toml"
+
+  # Rust: formatting, linting, and unused dependencies
+  - repo: https://github.com/AndrejOrsula/pre-commit-cargo
+    rev: 0.5.0
+    hooks:
+      - id: cargo-fmt
+        args: ["--all"]
+        types: [rust]
+      - id: cargo-clippy
+        args: ["--fix", "--allow-dirty", "--allow-staged",
+               "--all-features", "--all-targets", "--", "-D", "warnings"]
+        types_or: [rust, toml]
+
+  - repo: https://github.com/bnjbvr/cargo-machete
+    rev: v0.9.2
+    hooks:
+      - id: cargo-machete
+
+  # Shell scripts: formatting and linting
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.13.1-1
+    hooks:
+      - id: shfmt
+        args: ["-w", "-i", "2"]
+
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.11.0
+    hooks:
+      - id: shellcheck
+        args: ['-x']
+
+  # Markdown: linting
+  - repo: https://github.com/rvben/rumdl-pre-commit
+    rev: "v0.1.93"
+    hooks:
+      - id: rumdl-fmt
+
+  # Spelling
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.46.2
+    hooks:
+      - id: typos
+        args: [--force-exclude]
+
+  # GitHub Actions: linting
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
