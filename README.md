@@ -308,12 +308,16 @@ Successful `--update` runs exit `0`, even when files were changed. Use
 
 ## Release Roadmap
 
-The Rust crate is the source package. Release automation will use GoReleaser for
-GitHub archives and Homebrew, with wrapper packages for npm and PyPI. Planned
-distribution targets are:
+The Rust crate is the source package. Release automation uses GoReleaser for
+GitHub archives and Homebrew formula generation, with wrapper packages for npm
+and PyPI. Distribution targets are:
 
 - crates.io
 - GitHub release archives
-- Homebrew with bottles, after the archive flow is stable
-- npm, after the CLI and JSON output contract are stable
-- PyPI, after the CLI and JSON output contract are stable
+- Homebrew with bottles through the `Goldziher/homebrew-tap` bottle workflow
+- npm package `gh-actions-updater`
+- PyPI package `gh-actions-updater`
+
+The npm and PyPI packages do not include checked-in platform binaries. They
+download the matching archive from GitHub Releases and cache or install the
+binary for the current platform after verifying the release checksum.

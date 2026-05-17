@@ -1,0 +1,302 @@
+name: Publish Packages
+
+on:
+  push:
+    tags:
+      - v[0-9]+.*
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, for example v0.1.0"
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  meta:
+    name: Resolve versions
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      python_version: ${{ steps.version.outputs.python_version }}
+      tag: ${{ steps.version.outputs.tag }}
+      crates_exists: ${{ steps.published.outputs.crates_exists }}
+      npm_exists: ${{ steps.published.outputs.npm_exists }}
+      pypi_exists: ${{ steps.published.outputs.pypi_exists }}
+      release_assets_exist: ${{ steps.release_assets.outputs.release_assets_exist }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "20"
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ github.event.inputs.tag }}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "unsupported release tag: $tag" >&2
+            exit 2
+          fi
+          git rev-parse --verify "refs/tags/$tag"
+
+          version="${tag#v}"
+          if [[ "$version" == *"-rc."* ]]; then
+            python_version="$(echo "$version" | sed -E 's/-rc\.([0-9]+)$/rc\1/')"
+          else
+            python_version="$version"
+          fi
+
+          {
+            echo "version=$version"
+            echo "python_version=$python_version"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify package versions
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          python_version="${{ steps.version.outputs.python_version }}"
+
+          cargo_version="$(cargo metadata --locked --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          npm_version="$(node -p "require('./npm-package/package.json').version")"
+          pypi_version="$(python - <<'PY'
+          import tomllib
+          with open('pip-package/pyproject.toml', 'rb') as file:
+              print(tomllib.load(file)['project']['version'])
+          PY
+          )"
+          runtime_python_version="$(python - <<'PY'
+          namespace = {}
+          with open('pip-package/gh_actions_updater/__init__.py', 'r', encoding='utf-8') as file:
+              exec(file.read(), namespace)
+          print(namespace['__version__'])
+          PY
+          )"
+
+          test "$cargo_version" = "$version"
+          test "$npm_version" = "$version"
+          test "$pypi_version" = "$python_version"
+          test "$runtime_python_version" = "$python_version"
+
+      - name: Detect already-published versions
+        id: published
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          python_version="${{ steps.version.outputs.python_version }}"
+
+          crates_exists=false
+          if curl -fsS "https://crates.io/api/v1/crates/gh-actions-updater/${version}" >/dev/null; then
+            crates_exists=true
+          fi
+
+          npm_exists=false
+          if npm view "gh-actions-updater@${version}" version >/dev/null 2>&1; then
+            npm_exists=true
+          fi
+
+          pypi_exists=false
+          if curl -fsS "https://pypi.org/pypi/gh-actions-updater/${python_version}/json" >/dev/null; then
+            pypi_exists=true
+          fi
+
+          {
+            echo "crates_exists=$crates_exists"
+            echo "npm_exists=$npm_exists"
+            echo "pypi_exists=$pypi_exists"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Detect existing GitHub release assets
+        id: release_assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.version.outputs.tag }}"
+          expected_assets="$(
+            cat <<ASSETS
+          gh-actions-updater-aarch64-apple-darwin.tar.gz
+          gh-actions-updater-aarch64-unknown-linux-gnu.tar.gz
+          gh-actions-updater-x86_64-apple-darwin.tar.gz
+          gh-actions-updater-x86_64-pc-windows-gnu.zip
+          gh-actions-updater-x86_64-unknown-linux-gnu.tar.gz
+          checksums.txt
+          ASSETS
+          )"
+          release_assets_exist=true
+
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            release_assets_exist=false
+          else
+            asset_names="$(gh release view "$tag" --json assets --jq '.assets[].name')"
+            while IFS= read -r expected; do
+              if ! grep -Fxq "$expected" <<<"$asset_names"; then
+                release_assets_exist=false
+              fi
+            done <<<"$expected_assets"
+          fi
+
+          echo "release_assets_exist=$release_assets_exist" >> "$GITHUB_OUTPUT"
+
+  release_assets:
+    name: Publish GitHub release assets
+    needs: meta
+    if: needs.meta.outputs.release_assets_exist != 'true'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu,x86_64-apple-darwin,aarch64-apple-darwin,x86_64-pc-windows-gnu
+
+      - name: Install cross-build tools
+        run: brew install zig mingw-w64
+
+      - name: Build and publish GitHub release assets
+        uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8 # v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean --skip=validate
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ needs.meta.outputs.tag }}
+
+  request_homebrew_bottles:
+    name: Request Homebrew bottles
+    needs: [meta, release_assets]
+    if: always() && needs.meta.result == 'success' && (needs.release_assets.result == 'success' || needs.release_assets.result == 'skipped') && !contains(needs.meta.outputs.tag, '-')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch tap bottle workflow
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh workflow run bottle.yml \
+            --repo Goldziher/homebrew-tap \
+            -f formula=gh-actions-updater \
+            -f tag="${{ needs.meta.outputs.tag }}"
+
+  publish_crates:
+    name: Publish crates.io
+    needs: meta
+    if: needs.meta.outputs.crates_exists != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Authenticate to crates.io
+        uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1.0.4
+        id: crates_auth
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates_auth.outputs.token }}
+        run: |
+          set -euo pipefail
+          cargo publish --locked
+
+  publish_npm:
+    name: Publish npm
+    needs: [meta, release_assets]
+    if: always() && needs.meta.result == 'success' && needs.meta.outputs.npm_exists != 'true' && (needs.release_assets.result == 'success' || needs.release_assets.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ""
+        run: |
+          set -euo pipefail
+          unset NODE_AUTH_TOKEN
+          cd npm-package
+          version="${{ needs.meta.outputs.version }}"
+          if [[ "$version" == *"-rc."* ]]; then
+            npm_tag="beta"
+          else
+            npm_tag="latest"
+          fi
+
+          npm publish --provenance --access public --tag "$npm_tag"
+
+  publish_pypi:
+    name: Publish PyPI
+    needs: [meta, release_assets]
+    if: always() && needs.meta.result == 'success' && needs.meta.outputs.pypi_exists != 'true' && (needs.release_assets.result == 'success' || needs.release_assets.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Build Python package
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install build
+          cd pip-package
+          python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
+        with:
+          packages-dir: pip-package/dist
+          skip-existing: true

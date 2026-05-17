@@ -1,1 +1,9 @@
 /target
+/dist
+/npm-package/node_modules
+/npm-package/vendor/gh-actions-updater
+/npm-package/vendor/gh-actions-updater.exe
+/pip-package/build
+/pip-package/dist
+/pip-package/*.egg-info
+__pycache__/

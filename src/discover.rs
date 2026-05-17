@@ -73,9 +73,10 @@ fn push_if_match(
     include: &GlobSet,
     exclude: &GlobSet,
 ) {
-    let normalized = normalize(path.strip_prefix(base).unwrap_or(path));
+    let root_relative = normalize(path.strip_prefix(base).unwrap_or(path));
+    let normalized = normalize(path);
     if is_candidate_file(path)
-        && include.is_match(&normalized)
+        && (include.is_match(&root_relative) || matches_glob_or_suffix(include, &normalized))
         && !matches_glob_or_suffix(exclude, &normalized)
     {
         files.push(path.to_path_buf());
@@ -194,6 +195,19 @@ mod tests {
 
         let files = discover_files(&settings).unwrap();
         assert_eq!(files, vec![file]);
+    }
+
+    #[test]
+    fn explicit_dot_github_directory_scans_workflows() {
+        let temp = tempfile::tempdir().unwrap();
+        let workflow = temp.path().join(".github/workflows/ci.yml");
+        fs::create_dir_all(workflow.parent().unwrap()).unwrap();
+        fs::write(&workflow, "name: ci").unwrap();
+        let mut settings = settings(temp.path());
+        settings.paths = vec![temp.path().join(".github").display().to_string()];
+
+        let files = discover_files(&settings).unwrap();
+        assert_eq!(files, vec![workflow]);
     }
 
     #[test]

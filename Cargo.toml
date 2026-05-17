@@ -2,6 +2,24 @@
 name = "gh-actions-updater"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+description = "Fast GitHub Actions reference scanner and updater"
+license = "MIT"
+repository = "https://github.com/Goldziher/gh-actions-updater"
+homepage = "https://github.com/Goldziher/gh-actions-updater"
+readme = "README.md"
+categories = ["command-line-utilities", "development-tools"]
+keywords = ["github-actions", "ci", "cli", "workflow", "updater"]
+include = [
+    "Cargo.toml",
+    "Cargo.lock",
+    "README.md",
+    "LICENSE",
+    "src/**",
+    "tests/**",
+    "docs/**",
+    ".pre-commit-hooks.yaml",
+]
 
 [dependencies]
 ahash = "0.8"
