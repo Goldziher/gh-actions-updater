@@ -25,6 +25,8 @@ pub struct Settings {
     pub update: bool,
     pub latest_hash: bool,
     pub missing_ref: MissingRefPolicy,
+    pub include_prereleases: bool,
+    pub preserve_major: bool,
     pub check: bool,
     pub dry_run: bool,
     pub diff: bool,
@@ -193,6 +195,8 @@ impl Settings {
                 .missing_ref
                 .or(file_config.update.missing_ref)
                 .unwrap_or(MissingRefPolicy::Warn),
+            include_prereleases: file_config.update.include_prereleases.unwrap_or(false),
+            preserve_major: file_config.update.preserve_major.unwrap_or(true),
             check: cli.check,
             dry_run: cli.dry_run || !cli.update,
             diff: cli.diff,

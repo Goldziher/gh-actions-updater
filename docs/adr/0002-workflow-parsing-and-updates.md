@@ -73,20 +73,22 @@ Update semantics:
 - branch refs are reported but not updated by default
 - SHA refs are reported but not updated by default
 - non-semver tag sets are reported but not updated by default
-- deleted or missing remote refs are controlled by the missing-ref policy
+- deleted or missing remote tag refs are controlled by the missing-ref policy
 - `--latest-hash` selects the same tag as latest-tag mode, then pins the commit
   SHA behind that tag
 
 Missing-ref policy values:
 
-- `warn`: report the missing tag or SHA and continue
+- `warn`: report the missing tag and continue
 - `error`: fail check/update runs when the current ref no longer exists
 - `ignore`: suppress missing-ref diagnostics
 - `fallback`: select the normal update target and allow `--update` to rewrite
   to it
 
-The default is `warn`. The updater must not silently rewrite a deleted tag unless
-the effective policy is `fallback`.
+The default is `warn`. The latest-tag resolver enforces this policy for tag refs
+only; SHA existence checks are part of the hash-resolution iteration. The
+updater must not silently rewrite a deleted tag unless the effective policy is
+`fallback`.
 
 When file rewriting is implemented, the updater will use span-based replacement
 of only the `@ref` substring in simple scalar `uses:` values. It must not

@@ -152,6 +152,8 @@ mod tests {
             update: false,
             latest_hash: false,
             missing_ref: MissingRefPolicy::Warn,
+            include_prereleases: false,
+            preserve_major: true,
             check: false,
             dry_run: true,
             diff: false,

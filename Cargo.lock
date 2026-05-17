@@ -350,6 +350,7 @@ dependencies = [
  "ignore",
  "memchr",
  "saphyr",
+ "semver",
  "serde",
  "serde_json",
  "tempfile",

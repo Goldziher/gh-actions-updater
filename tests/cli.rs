@@ -17,7 +17,7 @@ fn human_scan_exits_zero() {
 jobs:
   test:
     steps:
-      - uses: actions/checkout@v4
+      - uses: ./.github/actions/local
 "#,
     )
     .unwrap();
@@ -30,7 +30,7 @@ jobs:
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("found 1 reference"));
-    assert!(stdout.contains("actions/checkout@v4"));
+    assert!(stdout.contains("./.github/actions/local"));
 }
 
 #[test]
@@ -43,7 +43,7 @@ fn json_output_keeps_top_level_shape_when_quiet() {
         r#"
 jobs:
   call:
-    uses: owner/repo/.github/workflows/reuse.yml@v1
+    uses: ./.github/workflows/reuse.yml
 "#,
     )
     .unwrap();

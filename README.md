@@ -143,14 +143,15 @@ Supported `uses:` locations:
 - immutable 40-character SHA refs are reported but not updated by default.
 - non-semver tag sets are reported but not updated by default.
 
-Deleted or missing refs are handled separately from normal update checks. The
-default `missing_ref = "warn"` reports the missing ref but does not rewrite it.
+Deleted or missing tag refs are handled separately from normal update checks.
+The default `missing_ref = "warn"` reports the missing tag but does not rewrite
+it. SHA existence checks are part of the later hash-resolution iteration.
 
 Missing-ref policies:
 
 | Policy | Behavior |
 | --- | --- |
-| `warn` | Report the missing tag or SHA and continue. |
+| `warn` | Report the missing tag and continue. |
 | `error` | Treat the missing ref as a failure; exits `1` in `--check`, otherwise exits `4`. |
 | `ignore` | Suppress missing-ref diagnostics for intentionally unavailable refs. |
 | `fallback` | Select the normal update target and allow `--update` to rewrite to it. |

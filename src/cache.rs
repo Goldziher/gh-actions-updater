@@ -2,7 +2,9 @@ use crate::config::{CacheTtl, Settings};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::ErrorKind;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CacheReport {
@@ -17,7 +19,9 @@ pub struct CacheReport {
 pub struct CacheState {
     pub report: CacheReport,
     pub dir: PathBuf,
-    pub key_prefix: String,
+    pub enabled: bool,
+    pub refresh: bool,
+    pub ttl: CacheTtl,
 }
 
 impl CacheState {
@@ -45,19 +49,84 @@ impl CacheState {
                 refreshes: 0,
             },
             dir: settings.cache_dir.clone(),
-            key_prefix: cache_key(CacheKeyParts {
-                api_host: &settings.github_api_url,
-                owner: "",
-                repo: "",
-                lookup_mode: if settings.latest_hash { "hash" } else { "tags" },
-                auth_fingerprint: if settings.github_token_present {
-                    "present"
-                } else {
-                    "anonymous"
-                },
-            }),
+            enabled: settings.cache_enabled,
+            refresh: settings.refresh_cache,
+            ttl: settings.cache_ttl.clone(),
         })
     }
+
+    pub fn read_json<T: for<'de> Deserialize<'de>>(&mut self, key: &str) -> Result<CacheLookup<T>> {
+        if !self.enabled || self.refresh {
+            return Ok(CacheLookup::Miss);
+        }
+
+        let path = self.entry_path(key);
+        let content = match fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                self.report.misses += 1;
+                return Ok(CacheLookup::Miss);
+            }
+            Err(error) => {
+                return Err(error).with_context(|| format!("failed to read {}", path.display()));
+            }
+        };
+
+        let entry: CacheEntry<T> = match serde_json::from_str(&content) {
+            Ok(entry) => entry,
+            Err(_) => return Ok(CacheLookup::Corrupt),
+        };
+        if self.is_fresh(entry.fetched_at) {
+            self.report.fresh_hits += 1;
+            Ok(CacheLookup::Fresh(entry.value))
+        } else {
+            self.report.stale_hits += 1;
+            Ok(CacheLookup::Stale(entry.value))
+        }
+    }
+
+    pub fn write_json<T: Serialize>(&mut self, key: &str, value: &T) -> Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        fs::create_dir_all(&self.dir)
+            .with_context(|| format!("failed to create cache directory {}", self.dir.display()))?;
+        let path = self.entry_path(key);
+        let entry = CacheEntry {
+            fetched_at: unix_now(),
+            value,
+        };
+        fs::write(&path, serde_json::to_vec(&entry)?)
+            .with_context(|| format!("failed to write cache entry {}", path.display()))?;
+        self.report.refreshes += 1;
+        Ok(())
+    }
+
+    fn entry_path(&self, key: &str) -> PathBuf {
+        self.dir.join(format!("{key}.json"))
+    }
+
+    fn is_fresh(&self, fetched_at: u64) -> bool {
+        match self.ttl {
+            CacheTtl::Never => true,
+            CacheTtl::Seconds(ttl) => unix_now().saturating_sub(fetched_at) <= ttl,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum CacheLookup<T> {
+    Fresh(T),
+    Stale(T),
+    Corrupt,
+    Miss,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct CacheEntry<T> {
+    fetched_at: u64,
+    value: T,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
@@ -81,6 +150,12 @@ pub fn cache_key(parts: CacheKeyParts<'_>) -> String {
     hasher.update(b"\0");
     hasher.update(parts.auth_fingerprint.as_bytes());
     hasher.finalize().to_hex().to_string()
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
 }
 
 #[cfg(test)]

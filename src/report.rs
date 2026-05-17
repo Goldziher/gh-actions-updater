@@ -1,6 +1,7 @@
-use crate::cache::{CacheReport, CacheState};
+use crate::cache::CacheReport;
 use crate::cli::OutputFormat;
 use crate::config::Settings;
+use crate::metadata::MetadataResolution;
 use crate::scanner::{Diagnostic, FileReport, ReferenceReport, ScanOutput};
 use anyhow::Result;
 use serde::Serialize;
@@ -45,13 +46,12 @@ impl RunReport {
     pub fn from_scan(
         version: &str,
         settings: &Settings,
-        cache: CacheState,
+        resolution: MetadataResolution,
         files: Vec<PathBuf>,
         scan: ScanOutput,
     ) -> Self {
         let _ = files;
         let references_found = scan.references.len();
-        let _ = (&cache.dir, &cache.key_prefix);
         let _ = (
             settings.dry_run,
             settings.color,
@@ -59,6 +59,8 @@ impl RunReport {
             settings.schema_validation,
             settings.missing_ref,
             settings.refresh_cache,
+            settings.include_prereleases,
+            settings.preserve_major,
         );
         Self {
             version: version.to_string(),
@@ -66,13 +68,17 @@ impl RunReport {
             summary: Summary {
                 files_scanned: scan.files.len(),
                 references_found,
-                updates_available: 0,
+                updates_available: resolution.updates.len(),
             },
             files: scan.files,
             references: scan.references,
-            updates: Vec::new(),
-            diagnostics: scan.diagnostics,
-            cache: cache.report,
+            updates: resolution.updates,
+            diagnostics: {
+                let mut diagnostics = scan.diagnostics;
+                diagnostics.extend(resolution.diagnostics);
+                diagnostics
+            },
+            cache: resolution.cache,
             format: settings.format,
             quiet: settings.quiet,
             verbose: settings.verbose,
@@ -104,6 +110,15 @@ impl RunReport {
                             reference.column,
                             reference.raw,
                             reference.parsed.kind
+                        )?;
+                    }
+
+                    for update in &self.updates {
+                        let target = update.target.as_deref().unwrap_or("<unknown>");
+                        writeln!(
+                            stdout,
+                            "update {}:{} {} -> {}",
+                            update.file, update.line, update.current, target
                         )?;
                     }
                 }
