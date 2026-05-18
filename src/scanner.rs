@@ -210,9 +210,12 @@ fn scan_content(path: &Path, kind: FileKind, content: &str) -> Result<Vec<Refere
     for value in values {
         let raw = value.raw;
         let parsed = parse_uses(&raw);
+        // Try to find the ref span in the source. First attempt: use the value span we found.
+        // Second attempt: if that failed, try to find the @ symbol directly in the content.
         let ref_span = value
             .value_span
-            .and_then(|span| find_ref_span(&raw, span.start));
+            .and_then(|span| find_ref_span(&raw, span.start))
+            .or_else(|| find_ref_span_fallback(content, &raw, value.value_span));
         let rewrite_supported = ref_span.is_some() && parsed.ref_name.is_some();
         let rewrite_reason = if rewrite_supported {
             None
@@ -350,6 +353,40 @@ fn find_value_span(value: &MarkedYaml<'_>, raw: &str) -> Option<ByteSpan> {
         return None;
     }
     Some(ByteSpan { start, end })
+}
+
+fn find_ref_span_fallback(
+    content: &str,
+    _raw: &str,
+    parser_span: Option<ByteSpan>,
+) -> Option<ByteSpan> {
+    // If we have a parser span, try to find the @ symbol within that region.
+    // This is a fallback for when find_value_span_in_source fails (e.g., due to
+    // whitespace normalization or other parser-specific quirks).
+    if let Some(span) = parser_span {
+        if span.end > content.len()
+            || !content.is_char_boundary(span.start)
+            || !content.is_char_boundary(span.end)
+        {
+            return None;
+        }
+        let region = &content[span.start..span.end];
+        // Look for the @ symbol in the region
+        if let Some(at_offset) = region.find('@') {
+            // Verify that what comes after @ looks like a ref (no spaces, reasonable length)
+            let after_at = &region[at_offset + 1..];
+            if !after_at.is_empty() && !after_at.starts_with(' ') && !after_at.starts_with('\t') {
+                // Calculate the ref span as everything from @ to the end of the region
+                let ref_start = span.start + at_offset;
+                let ref_end = span.end;
+                return Some(ByteSpan {
+                    start: ref_start,
+                    end: ref_end,
+                });
+            }
+        }
+    }
+    None
 }
 
 fn find_ref_span(raw: &str, raw_start: usize) -> Option<ByteSpan> {
@@ -641,5 +678,88 @@ jobs:
         )
         .unwrap();
         assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn supports_bare_uses_without_leading_dash() {
+        let content = r#"
+jobs:
+  setup:
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup
+        uses: actions/setup-node@v20
+"#;
+        let refs = scan_content(
+            Path::new(".github/workflows/ci.yml"),
+            FileKind::Workflow,
+            content,
+        )
+        .unwrap();
+        assert_eq!(refs.len(), 2);
+        assert!(refs[0].rewrite_supported, "First ref should be rewritable");
+        assert!(refs[1].rewrite_supported, "Second ref should be rewritable");
+        let span0 = refs[0].ref_span.expect("Should have ref span");
+        assert_eq!(&content[span0.start..span0.end], "v6");
+        let span1 = refs[1].ref_span.expect("Should have ref span");
+        assert_eq!(&content[span1.start..span1.end], "v20");
+    }
+
+    #[test]
+    fn supports_subpath_action_repos() {
+        let content = r#"
+jobs:
+  build:
+    steps:
+      - uses: gradle/actions/setup-gradle@v6
+      - uses: astral-sh/setup-uv@v7.6.0
+"#;
+        let refs = scan_content(
+            Path::new(".github/workflows/ci.yml"),
+            FileKind::Workflow,
+            content,
+        )
+        .unwrap();
+        assert_eq!(refs.len(), 2);
+        assert!(
+            refs[0].rewrite_supported,
+            "Gradle action should be rewritable"
+        );
+        assert_eq!(refs[0].parsed.owner.as_deref(), Some("gradle"));
+        assert_eq!(refs[0].parsed.repo.as_deref(), Some("actions"));
+        assert_eq!(refs[0].parsed.path.as_deref(), Some("setup-gradle"));
+        let span0 = refs[0].ref_span.expect("Should have ref span");
+        assert_eq!(&content[span0.start..span0.end], "v6");
+
+        assert!(refs[1].rewrite_supported, "Setup-uv should be rewritable");
+        assert_eq!(refs[1].parsed.owner.as_deref(), Some("astral-sh"));
+        assert_eq!(refs[1].parsed.repo.as_deref(), Some("setup-uv"));
+        let span1 = refs[1].ref_span.expect("Should have ref span");
+        assert_eq!(&content[span1.start..span1.end], "v7.6.0");
+    }
+
+    #[test]
+    fn preserves_trailing_comments_in_ref_span() {
+        let content = r#"
+jobs:
+  test:
+    steps:
+      - uses: actions/checkout@v6 # pinned to v6
+      - uses: actions/setup-node@v20 # latest LTS
+"#;
+        let refs = scan_content(
+            Path::new(".github/workflows/ci.yml"),
+            FileKind::Workflow,
+            content,
+        )
+        .unwrap();
+        assert_eq!(refs.len(), 2);
+        assert!(refs[0].rewrite_supported, "Checkout should be rewritable");
+        assert!(refs[1].rewrite_supported, "Setup-node should be rewritable");
+        let span0 = refs[0].ref_span.expect("Should have ref span");
+        assert_eq!(&content[span0.start..span0.end], "v6");
+        let span1 = refs[1].ref_span.expect("Should have ref span");
+        assert_eq!(&content[span1.start..span1.end], "v20");
     }
 }
