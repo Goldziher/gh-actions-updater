@@ -110,7 +110,9 @@ jobs:
           python_version="${{ steps.version.outputs.python_version }}"
 
           crates_exists=false
-          if curl -fsS "https://crates.io/api/v1/crates/gh-actions-updater/${version}" >/dev/null; then
+          if curl -fsS \
+            -H "User-Agent: gh-actions-updater-release (https://github.com/Goldziher/gh-actions-updater)" \
+            "https://crates.io/api/v1/crates/gh-actions-updater/${version}" >/dev/null; then
             crates_exists=true
           fi
 
