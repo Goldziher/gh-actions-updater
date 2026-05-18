@@ -1,6 +1,6 @@
 [package]
 name = "gh-actions-updater"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
 description = "Fast GitHub Actions reference scanner and updater"
@@ -14,12 +14,17 @@ include = [
     "Cargo.toml",
     "Cargo.lock",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "src/**",
     "tests/**",
     "docs/**",
     ".pre-commit-hooks.yaml",
 ]
+
+[[bin]]
+name = "gau"
+path = "src/main.rs"
 
 [dependencies]
 ahash = "0.8"
@@ -32,6 +37,7 @@ globset = "0.4"
 ignore = "0.4"
 jsonschema = { version = "0.46", default-features = false }
 memchr = "2"
+rayon = "1"
 saphyr = "0.0.6"
 semver = "1"
 serde = { version = "1", features = ["derive"] }

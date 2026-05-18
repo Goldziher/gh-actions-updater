@@ -1,6 +1,6 @@
 # ADR 0004: Configuration And Pre-commit Hook
 
-Status: Accepted for v0.1.0 implementation
+Status: Accepted for v0.1.1 implementation
 
 ## Context
 
@@ -25,13 +25,14 @@ Precedence order:
 
 Initial config sections:
 
-- `[scan]`: `include`, `exclude`
+- `[scan]`: `include`, `exclude`, `recursive`
 - `[cache]`: `enabled`, `ttl`, `dir`
-- `[update]`: `mode`, `include_prereleases`, `preserve_major`, `missing_ref`
+- `[update]`: `mode`, `exclude`, `include_prereleases`, `preserve_major`, `missing_ref`
 - `[github]`: `api_url`
 - `[output]`: `format`, `color`
+- `[performance]`: `threads`
 
-Presentation flags `quiet`, `verbose`, and `diff` are CLI-only for v0.1.0.
+Presentation flags `quiet`, `verbose`, and `diff` are CLI-only for v0.1.1.
 
 The user-facing pre-commit hook will be published in `.pre-commit-hooks.yaml`
 with hook id `gh-actions-updater`. The default hook args are check-only and do
@@ -41,7 +42,7 @@ The hook contract is:
 
 - `id: gh-actions-updater`
 - `name: gh-actions-updater`
-- `entry: gh-actions-updater --check`
+- `entry: gau --check`
 - `language: rust`
 - `pass_filenames: false`
 - `stages: [pre-commit]`

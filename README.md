@@ -1,41 +1,55 @@
 # gh-actions-updater
 
-Version: `0.1.0`
+Version: `0.1.1`
 
-`gh-actions-updater` is a Rust 2024 CLI for finding and updating GitHub Actions
-references in repository workflow and action metadata files. The v0.1.0 surface
-is designed around fast local and pre-commit use: scan GitHub Actions YAML,
-resolve available tag updates with a cache, and only perform heavier
-commit-hash lookup when requested.
+`gh-actions-updater` is the package. `gau` is the CLI command.
 
-This README defines the intended v0.1.0 CLI contract. The current
-implementation supports scan, latest-tag and latest-hash resolution,
-cache-backed metadata, schema diagnostics, safe updates, and diffs.
+`gau` scans GitHub Actions workflow files and action metadata, reports available
+updates, and can rewrite supported `uses:` refs to the latest compatible tag or
+to the commit SHA behind that tag. It is built for fast local, CI, and
+pre-commit use with a global metadata cache.
 
-## Default Behavior
+## Install
 
-By default, the tool:
+```bash
+# Homebrew
+brew tap goldziher/tap
+brew install gh-actions-updater
 
-- scans `.github/workflows/**/*.yml` and `.github/workflows/**/*.yaml`
-- scans repository `action.yml` and `action.yaml` files
-- scans `.github/actions/**/action.yml` and `.github/actions/**/action.yaml`
-- reports remote action and reusable workflow references from supported `uses:`
-  entries
-- checks latest tag metadata when cache entries are stale
-- uses the global cache unless disabled
-- does not rewrite workflow files unless `--update` is passed
+# Cargo
+cargo install gh-actions-updater
 
-Local actions such as `./.github/actions/build`, Docker image references, and
-local reusable workflow calls are reported as non-updatable.
+# npm
+npm install -g gh-actions-updater
+npx -y gh-actions-updater@latest --help
+
+# PyPI
+pip install gh-actions-updater
+uvx --from gh-actions-updater gau --help
+```
+
+All package managers install the `gau` command.
 
 ## Usage
 
 ```bash
-gh-actions-updater [OPTIONS] [PATHS]...
+gau [OPTIONS] [PATHS]...
 ```
 
-`PATHS` may be files, directories, or glob patterns. When no paths are supplied,
-the default scan set is:
+Common commands:
+
+```bash
+gau --init
+gau .
+gau --check .
+gau --update .
+gau --update --diff .
+gau --latest-hash --update .
+gau -r ~/workspace --check
+```
+
+When no path is supplied, `gau` scans the current directory. By default it scans
+only the current repository's GitHub Actions surface:
 
 - `.github/workflows/**/*.yml`
 - `.github/workflows/**/*.yaml`
@@ -44,41 +58,53 @@ the default scan set is:
 - `action.yml`
 - `action.yaml`
 
+Use `-r, --recursive` to scan nested repositories or workspaces.
+
 ## CLI Flags
 
 | Flag | Description |
 | --- | --- |
-| `-c, --config <PATH>` | Load a specific TOML config file instead of discovering one. |
-| `--include <GLOB>` | Add an include glob. Can be repeated. |
-| `--exclude <GLOB>` | Add an exclude glob. Can be repeated. |
-| `--cache-dir <PATH>` | Override the global cache directory for this run. |
-| `--cache-ttl <DURATION>` | Override cache TTL, for example `15m`, `6h`, `7d`, or `never`. |
-| `--refresh-cache` | Ignore existing cache entries and write fresh metadata after fetching. |
-| `--no-cache` | Disable cache reads and writes for this run. |
-| `--update` | Rewrite supported workflow refs to the selected target version. |
-| `--latest-hash` | Resolve update targets to commit SHAs instead of latest tags. |
-| `--missing-ref <warn\|error\|ignore\|fallback>` | Behavior when the current remote tag or SHA no longer exists. |
-| `--check` | Exit non-zero when updates are available. Does not rewrite files. |
-| `--dry-run` | Show planned changes without writing files. Implied when `--update` is absent. |
-| `--diff` | Show unified diffs for proposed workflow updates. |
-| `--format <human\|json>` | Select human-readable or JSON output. Default: `human`. |
+| `--init` | Write an initial `.gh-actions-updater.toml`. |
+| `--force` | Allow `--init` to overwrite an existing config. |
+| `--output <PATH>` | Write `--init` config to a specific path. |
+| `-c, --config <PATH>` | Load a specific TOML config file. |
+| `--include <GLOB>` | Add an include glob. Repeatable. |
+| `--exclude <GLOB>` | Add an exclude glob. Repeatable. |
+| `-r, --recursive` | Scan nested `.github` folders under input directories. |
+| `--threads <N>` | Override Rayon thread count. Default uses available CPU cores. |
+| `--cache-dir <PATH>` | Override the global cache directory. |
+| `--cache-ttl <DURATION>` | Cache TTL such as `15m`, `6h`, `7d`, `0`, or `never`. |
+| `--refresh-cache` | Ignore existing cache entries and fetch fresh metadata. |
+| `--no-cache` | Disable cache reads and writes. |
+| `--update` | Rewrite supported refs. |
+| `--latest-hash` | Pin update targets to commit SHAs instead of tags. |
+| `--missing-ref <warn\|error\|ignore\|fallback>` | Policy for deleted or missing current refs. |
+| `--check` | Exit nonzero when updates are available. Does not rewrite files. |
+| `--dry-run` | Preview without writing. Implied unless `--update` is passed. |
+| `--diff` | Include unified diffs for proposed updates. |
+| `--format <human\|json>` | Select output format. |
 | `-q, --quiet` | Suppress non-error human output. |
-| `-v, --verbose` | Print cache, network, and file discovery details. |
-| `--color <auto\|always\|never>` | Control color in human output. Default: `auto`. |
-| `--github-token <TOKEN>` | Use a GitHub token for metadata requests. Environment variables are preferred. |
-| `--github-api-url <URL>` | Use a GitHub-compatible API endpoint. Default: `https://api.github.com`. |
-| `--strict-schema` | Treat GitHub workflow schema validation diagnostics as failures. |
-| `--no-schema-validation` | Skip workflow schema validation and only scan `uses:` refs. |
+| `-v, --verbose` | Print cache details to stderr. |
+| `--color <auto\|always\|never>` | Control human output color. |
+| `--github-token <TOKEN>` | Use a GitHub token for metadata requests. |
+| `--github-api-url <URL>` | Use a GitHub-compatible API endpoint. |
+| `--strict-schema` | Treat schema diagnostics as failures. |
+| `--no-schema-validation` | Skip SchemaStore validation. |
 | `-h, --help` | Print help. |
 | `-V, --version` | Print version. |
 
-Normal latest-tag checks fetch tag metadata only.
-
 ## Configuration
 
-The default config file is `.gh-actions-updater.toml`. Discovery starts in the
-current directory, walks up to the repository root, and stops at the first match.
-`--config` disables discovery.
+Generate a starter config:
+
+```bash
+gau --init
+gau --init --recursive --force
+gau --init --output config/gau.toml
+```
+
+Config discovery looks for `.gh-actions-updater.toml` from the current
+directory upward until the repository root. `--config` disables discovery.
 
 ```toml
 [scan]
@@ -91,6 +117,7 @@ include = [
   "action.yaml",
 ]
 exclude = []
+recursive = false
 
 [cache]
 enabled = true
@@ -98,6 +125,7 @@ ttl = "6h"
 
 [update]
 mode = "latest-tag"
+exclude = []
 include_prereleases = false
 preserve_major = true
 missing_ref = "warn"
@@ -108,11 +136,13 @@ color = "auto"
 
 [github]
 api_url = "https://api.github.com"
+
+[performance]
+# Omit threads to use Rayon available-core default.
+# threads = 8
 ```
 
-Precedence is: CLI flags, environment variables, config file, defaults.
-Output presentation flags such as `--quiet`, `--verbose`, and `--diff` are
-CLI-only for v0.1.0.
+Precedence is CLI flags, environment variables, config file, then defaults.
 
 Supported environment variables:
 
@@ -124,128 +154,101 @@ Supported environment variables:
 
 ## Update Semantics
 
-The default update mode is `latest-tag`.
-
 Supported `uses:` locations:
 
 - workflow step actions: `jobs.<job_id>.steps[*].uses`
 - reusable workflow calls: `jobs.<job_id>.uses`
 - composite action step actions: `runs.steps[*].uses` when
   `runs.using = "composite"`
-- `owner/repo@v4` updates within the same major tag line when semver-like tags
-  are available.
-- `owner/repo@v4.1.0` updates within the same major version.
-- reusable workflows such as
-  `owner/repo/.github/workflows/reusable.yml@v1` follow the same tag/hash
-  update policy as actions.
-- prerelease tags are ignored unless configured.
-- branch refs such as `@main` are reported but not updated by default.
-- immutable 40-character SHA refs are reported but not updated by default.
-- non-semver tag sets are reported but not updated by default.
 
-Deleted or missing tag refs are handled separately from normal update checks.
-The default `missing_ref = "warn"` reports the missing tag but does not rewrite
-it. In `--latest-hash` mode, unmatched SHA refs are checked through cached
-commit metadata before the missing-ref policy is applied.
+Default mode is `latest-tag`. Semver-like refs such as `@v4` and `@v4.1.0`
+update within the current major version by default. Reusable workflows such as
+`owner/repo/.github/workflows/reusable.yml@v1` follow the same tag/hash policy.
 
-Missing-ref policies:
+Branch refs such as `@main`, Docker image refs, local actions, local reusable
+workflows, immutable SHAs, and non-semver tag sets are reported but not updated
+by default.
+
+Exclude specific remote actions or reusable workflows from updates in config:
+
+```toml
+[update]
+exclude = [
+  "actions/checkout",
+  "docker/*",
+  "owner/repo/.github/workflows/deploy.yml@v*",
+]
+```
+
+Inline ignores are also supported on the same line as a `uses:` value:
+
+```yaml
+- uses: actions/checkout@v4 # gau: ignore
+```
+
+`--latest-hash` first selects the same compatible tag that latest-tag mode would
+select, then rewrites to the commit SHA behind that selected tag. It does not
+jump to the action repository default branch.
+
+Deleted or missing refs are controlled by `missing_ref`:
 
 | Policy | Behavior |
 | --- | --- |
-| `warn` | Report the missing tag and continue. |
-| `error` | Treat the missing ref as a failure; exits `1` in `--check`, otherwise exits `4`. |
-| `ignore` | Suppress missing-ref diagnostics for intentionally unavailable refs. |
-| `fallback` | Select the normal update target and allow `--update` to rewrite to it. |
+| `warn` | Report the missing ref and continue. |
+| `error` | Treat the missing ref as a failure. |
+| `ignore` | Suppress missing-ref diagnostics. |
+| `fallback` | Allow normal update target selection and rewriting. |
 
-The updater must not silently rewrite a deleted tag unless the effective policy
-is `fallback`.
-
-The `--latest-hash` mode first selects the same tag that latest-tag mode would
-select, then pins the workflow to the commit SHA behind that selected tag. It
-does not jump to the action repository default branch. When the current ref is
-already a SHA, the resolver preserves the major version if that SHA matches a
-known semver tag. If the SHA does not map to a semver tag, `preserve_major =
-false` is required before the resolver can select the latest semver tag.
-
-## Schemas
-
-Workflow files are validated against the SchemaStore GitHub workflow schema:
-
-```text
-https://json.schemastore.org/github-workflow.json
-```
-
-Action metadata files are validated against the SchemaStore GitHub action
-metadata schema:
-
-```text
-https://json.schemastore.org/github-action.json
-```
-
-The schema is vendored into release builds so normal scans do not depend on
-network access. Schema diagnostics are reported with file diagnostics by
-default. `--strict-schema` turns schema diagnostics into exit code `3`, while
-`--no-schema-validation` skips schema validation and only scans supported
-`uses:` refs.
-
-## Cache And Metadata
+## Cache And Performance
 
 The default cache directory is the platform cache directory with
-`gh-actions-updater` appended, for example:
+`gh-actions-updater` appended:
 
-- Linux: `$XDG_CACHE_HOME/gh-actions-updater` or
-  `~/.cache/gh-actions-updater`
+- Linux: `$XDG_CACHE_HOME/gh-actions-updater` or `~/.cache/gh-actions-updater`
 - macOS: `~/Library/Caches/gh-actions-updater`
 - Windows: `%LOCALAPPDATA%\gh-actions-updater`
 
-Cache entries are keyed with `blake3` over the GitHub host, action repository,
-lookup mode, and relevant request identity. Latest-tag cache data includes the
-metadata provider, API host, auth fingerprint, tag lists, ETags, and fetch
-timestamps. Hash-mode cache entries add per-SHA commit-existence metadata when
-the current SHA cannot be matched to a fetched tag.
+Cache keys use `blake3`. Hot lookup sets/maps use `ahash`. YAML scanning uses a
+cheap `memchr` precheck before parsing. File scanning is parallelized with Rayon;
+by default Rayon uses available CPU cores. Use `--threads 1` for single-threaded
+debugging or deterministic profiling.
 
-Cache flags are exact:
+Cache behavior:
 
-- `--cache-ttl` changes freshness for this run.
-- `--refresh-cache` skips cache reads and writes fresh entries after successful
-  fetches.
-- `--no-cache` disables both cache reads and cache writes.
-
-Cache freshness behavior:
-
-| State | Behavior |
+| Flag/state | Behavior |
 | --- | --- |
-| Fresh cache hit | Use cached metadata. |
-| Stale cache hit | Try conditional metadata refresh. If refresh fails, use stale data with a warning in report-only mode. |
-| Stale cache hit with `--check` or `--update` | Try refresh. If refresh fails, exit `4` instead of using stale data. |
-| `--refresh-cache` | Skip cache reads. Fetch metadata and write fresh entries. If fetch fails, exit `4`. |
-| `--no-cache` | Fetch metadata without reading or writing cache. If fetch fails, exit `4`. |
-| `--cache-ttl 0` | Treat all entries as stale. |
-| `--cache-ttl never` | Treat existing entries as fresh until `--refresh-cache` is used. |
+| Fresh hit | Use cached metadata. |
+| Stale hit | Refresh metadata; report-only mode may use stale data with a warning if refresh fails. |
+| `--refresh-cache` | Skip cache reads and write fresh entries after fetch. |
+| `--no-cache` | Fetch without reading or writing cache. |
+| `--cache-ttl 0` | Treat entries as stale. |
+| `--cache-ttl never` | Treat existing entries as fresh until refresh is requested. |
 
-Corrupt cache entries are ignored and replaced when network access succeeds.
+Normal latest-tag checks fetch tag metadata only. The tool does not clone
+repositories for tag checks.
 
-Metadata lookup uses conditional GitHub REST requests with cached ETags when
-available. The implementation may use `git ls-remote --tags --refs` for public
-or git-accessible repositories when it is cheaper than API pagination. It must
-not clone repositories for tag-only checks.
+## Schemas
+
+Workflow files are validated against the vendored SchemaStore GitHub workflow
+schema. Action metadata files are validated against the vendored SchemaStore
+GitHub action schema.
+
+Schema diagnostics are nonfatal by default. `--strict-schema` exits with code
+`3` when schema diagnostics are present. `--no-schema-validation` skips schema
+validation and only scans supported `uses:` refs.
 
 ## Output
 
-Human output is written to stdout. Diagnostics, warnings, and network/cache logs
-are written to stderr. `--quiet` suppresses human stdout but not errors.
+Human output goes to stdout. Diagnostics and verbose cache details go to
+stderr. JSON output is always written to stdout, even with `--quiet`.
 
-JSON output is written to stdout and is not suppressed by `--quiet`. Logs and
-diagnostics that are not part of the JSON payload go to stderr. When `--diff`
-is requested, human output prints diff text and JSON output includes a `diffs`
-array.
-
-The v0.1.0 JSON shape is:
+JSON output includes:
 
 ```json
 {
-  "version": "0.1.0",
+  "version": "0.1.1",
   "changed": false,
+  "would_change": false,
   "summary": {
     "files_scanned": 0,
     "references_found": 0,
@@ -255,69 +258,49 @@ The v0.1.0 JSON shape is:
   "references": [],
   "updates": [],
   "diagnostics": [],
-  "diffs": [],
   "cache": {
     "enabled": true,
     "fresh_hits": 0,
     "stale_hits": 0,
     "misses": 0,
     "refreshes": 0
-  }
+  },
+  "diffs": []
 }
 ```
 
-## Pre-commit Hook
+`changed` means files were written. `would_change` means updates are available
+or a dry-run/diff would modify files.
 
-The project publishes a pre-commit hook through `.pre-commit-hooks.yaml`.
-The hook default is check-only:
+## Pre-commit
 
 ```yaml
 repos:
   - repo: https://github.com/Goldziher/gh-actions-updater
-    rev: v0.1.0
+    rev: v0.1.1
     hooks:
       - id: gh-actions-updater
 ```
 
-The hook uses `--check` and does not mutate files unless users pass
-`--update`. When cache TTL expires, it may refresh cheap tag metadata.
-Commit-hash resolution is enabled only when `--latest-hash` is passed.
-
-The hook contract is:
-
-- `id: gh-actions-updater`
-- `name: gh-actions-updater`
-- `entry: gh-actions-updater --check`
-- `language: rust`
-- `pass_filenames: false`
-- `stages: [pre-commit]`
+The hook entry is `gau --check`, uses the global cache, and does not mutate
+files. Users can pass args such as `--cache-ttl 24h`, `--no-cache`, or
+`--latest-hash`.
 
 ## Exit Codes
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Completed successfully and no blocking updates were found. |
-| `1` | `--check` found updates. |
-| `2` | Invalid CLI arguments or configuration. |
-| `3` | Workflow parsing failed. |
+| `0` | Completed successfully. |
+| `1` | `--check` found updates or missing-ref policy requested a check failure. |
+| `2` | Invalid CLI arguments, config, init, cache setup, or thread setup. |
+| `3` | File discovery, parsing, or strict schema validation failed. |
 | `4` | Metadata lookup failed and no usable cache entry exists. |
 | `5` | File rewrite failed. |
 
-Successful `--update` runs exit `0`, even when files were changed. Use
-`--check` for drift-detection behavior.
+## Release
 
-## Release Roadmap
+Release automation uses GoReleaser for GitHub archives and Homebrew formula
+generation, with wrapper packages for npm and PyPI. Distribution targets are
+crates.io, GitHub Releases, Homebrew bottles, npm, and PyPI.
 
-The Rust crate is the source package. Release automation uses GoReleaser for
-GitHub archives and Homebrew formula generation, with wrapper packages for npm
-and PyPI. Distribution targets are:
-
-- crates.io
-- GitHub release archives
-- Homebrew with bottles through the `Goldziher/homebrew-tap` bottle workflow
-- npm package `gh-actions-updater`
-- PyPI package `gh-actions-updater`
-
-The npm and PyPI packages do not include checked-in platform binaries. They
-download the matching archive from GitHub Releases and cache or install the
-binary for the current platform after verifying the release checksum.
+Package names stay `gh-actions-updater`. The installed command is `gau`.

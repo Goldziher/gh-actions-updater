@@ -1,6 +1,6 @@
 # ADR 0001: CLI Surface And Modes
 
-Status: Accepted for v0.1.0 implementation
+Status: Accepted for v0.1.1 implementation
 
 ## Context
 
@@ -10,7 +10,8 @@ able to run it without risking workflow rewrites.
 
 ## Decision
 
-The v0.1.0 binary is `gh-actions-updater` at version `0.1.0`.
+The v0.1.1 package name is `gh-actions-updater`; the installed binary is `gau`
+at version `0.1.1`.
 
 The default invocation scans workflow files and reports action refs. It does not
 write files unless `--update` is provided. `--dry-run` is therefore the default
@@ -19,7 +20,10 @@ effective mode when `--update` is absent.
 Supported flags:
 
 - `--config <PATH>`
+- `--init`, `--force`, and `--output <PATH>`
 - `--include <GLOB>` and `--exclude <GLOB>`
+- `--recursive`
+- `--threads <N>`
 - `--cache-dir <PATH>`
 - `--cache-ttl <DURATION>`
 - `--refresh-cache`
@@ -55,9 +59,10 @@ need drift detection must use `--check`.
 
 Machine-readable JSON is written to stdout. Logs, warnings, and diagnostics not
 included in the JSON payload are written to stderr. `--diff` prints diff text in
-human output and includes a `diffs` array in JSON output.
+human output and includes a `diffs` array in JSON output. JSON `changed` means
+files were written; `would_change` covers dry-run/check/diff automation.
 
 ## Consequences
 
 Automation can rely on a non-mutating default. The CLI has enough surface for
-pre-commit and CI without requiring separate subcommands in v0.1.0.
+pre-commit and CI without requiring separate subcommands in v0.1.1.

@@ -1,10 +1,10 @@
 {
   "name": "gh-actions-updater",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Fast GitHub Actions reference scanner and updater",
   "main": "index.js",
   "bin": {
-    "gh-actions-updater": "bin/gh-actions-updater"
+    "gau": "bin/gau"
   },
   "scripts": {
     "postinstall": "node install.js"
@@ -21,7 +21,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Goldziher/gh-actions-updater.git"
+    "url": "git+https://github.com/Goldziher/gh-actions-updater.git"
   },
   "homepage": "https://github.com/Goldziher/gh-actions-updater#readme",
   "bugs": {

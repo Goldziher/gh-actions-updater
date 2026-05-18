@@ -1,6 +1,6 @@
 # ADR 0002: GitHub Actions File Parsing And Update Semantics
 
-Status: Accepted for v0.1.0 implementation
+Status: Accepted for v0.1.1 implementation
 
 ## Context
 

@@ -1,6 +1,6 @@
 # ADR 0003: Cache And Metadata Fetching
 
-Status: Accepted for v0.1.0 implementation
+Status: Accepted for v0.1.1 implementation
 
 ## Context
 

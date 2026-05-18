@@ -1,7 +1,7 @@
 - id: gh-actions-updater
   name: gh-actions-updater
   description: Check GitHub Actions references for available latest-tag updates.
-  entry: gh-actions-updater --check
+  entry: gau --check
   language: rust
   pass_filenames: false
   stages: [pre-commit]

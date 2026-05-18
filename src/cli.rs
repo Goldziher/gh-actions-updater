@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "gh-actions-updater",
+    name = "gau",
     version,
     about = "Find and update GitHub Actions references",
     long_about = "Scan GitHub Actions workflow and action metadata files for remote action and reusable workflow references."
@@ -20,6 +20,21 @@ pub struct Cli {
 
     #[arg(long = "exclude", value_name = "GLOB")]
     pub exclude: Vec<String>,
+
+    #[arg(short = 'r', long)]
+    pub recursive: bool,
+
+    #[arg(long = "threads", value_name = "N")]
+    pub threads: Option<usize>,
+
+    #[arg(long)]
+    pub init: bool,
+
+    #[arg(long = "force")]
+    pub force: bool,
+
+    #[arg(long = "output", value_name = "PATH")]
+    pub output: Option<PathBuf>,
 
     #[arg(long = "cache-dir", value_name = "PATH")]
     pub cache_dir: Option<PathBuf>,

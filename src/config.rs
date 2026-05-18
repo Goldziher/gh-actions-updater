@@ -18,12 +18,15 @@ pub struct Settings {
     pub paths: Vec<String>,
     pub include: Vec<String>,
     pub exclude: Vec<String>,
+    pub recursive: bool,
+    pub threads: Option<usize>,
     pub cache_dir: PathBuf,
     pub cache_ttl: CacheTtl,
     pub cache_enabled: bool,
     pub refresh_cache: bool,
     pub update: bool,
     pub latest_hash: bool,
+    pub update_exclude: Vec<String>,
     pub missing_ref: MissingRefPolicy,
     pub include_prereleases: bool,
     pub preserve_major: bool,
@@ -59,12 +62,15 @@ struct FileConfig {
     output: OutputConfig,
     #[serde(default)]
     github: GithubConfig,
+    #[serde(default)]
+    performance: PerformanceConfig,
 }
 
 #[derive(Debug, Deserialize, Default)]
 struct ScanConfig {
     include: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    recursive: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -77,6 +83,7 @@ struct CacheConfig {
 #[derive(Debug, Deserialize, Default)]
 struct UpdateConfig {
     mode: Option<UpdateMode>,
+    exclude: Option<Vec<String>>,
     include_prereleases: Option<bool>,
     preserve_major: Option<bool>,
     missing_ref: Option<MissingRefPolicy>,
@@ -91,6 +98,11 @@ struct OutputConfig {
 #[derive(Debug, Deserialize, Default)]
 struct GithubConfig {
     api_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct PerformanceConfig {
+    threads: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -123,11 +135,13 @@ impl Settings {
         };
         include.extend(cli.include.iter().cloned());
 
-        let exclude = if !cli.exclude.is_empty() {
-            cli.exclude.clone()
-        } else {
-            file_config.scan.exclude.unwrap_or_default()
-        };
+        let mut exclude = file_config.scan.exclude.unwrap_or_default();
+        exclude.extend(cli.exclude.iter().cloned());
+        let recursive = cli.recursive || file_config.scan.recursive.unwrap_or(false);
+        let threads = cli.threads.or(file_config.performance.threads);
+        if threads == Some(0) {
+            anyhow::bail!("threads must be greater than 0");
+        }
 
         let cache_dir = cli
             .cache_dir
@@ -188,12 +202,15 @@ impl Settings {
             paths,
             include,
             exclude,
+            recursive,
+            threads,
             cache_dir,
             cache_ttl: parse_ttl(&ttl_raw)?,
             cache_enabled,
             refresh_cache: cli.refresh_cache,
             update: cli.update,
             latest_hash: matches!(update_mode, UpdateMode::LatestHash),
+            update_exclude: file_config.update.exclude.unwrap_or_default(),
             missing_ref: cli
                 .missing_ref
                 .or(file_config.update.missing_ref)
@@ -297,6 +314,9 @@ mod tests {
             ".github/workflows/*.yml",
             "--exclude",
             "**/skip.yml",
+            "--recursive",
+            "--threads",
+            "2",
             "--no-cache",
             "--cache-ttl",
             "0",
@@ -314,6 +334,8 @@ mod tests {
                 .contains(&".github/workflows/*.yml".to_string())
         );
         assert_eq!(settings.exclude, vec!["**/skip.yml"]);
+        assert!(settings.recursive);
+        assert_eq!(settings.threads, Some(2));
         assert_eq!(settings.cache_ttl, CacheTtl::Seconds(0));
         assert!(!settings.cache_enabled);
         assert_eq!(settings.missing_ref, MissingRefPolicy::Error);
@@ -347,5 +369,29 @@ color = "always"
         let settings = Settings::resolve(&cli).unwrap();
         assert_eq!(settings.format, OutputFormat::Human);
         assert_eq!(settings.color, ColorChoice::Never);
+    }
+
+    #[test]
+    fn cli_excludes_are_added_to_config_excludes() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = temp.path().join(".gh-actions-updater.toml");
+        std::fs::write(
+            &config,
+            r#"
+[scan]
+exclude = ["vendor/**"]
+"#,
+        )
+        .unwrap();
+
+        let cli = Cli::parse_from([
+            "gau",
+            "--config",
+            config.to_str().unwrap(),
+            "--exclude",
+            "generated/**",
+        ]);
+        let settings = Settings::resolve(&cli).unwrap();
+        assert_eq!(settings.exclude, vec!["vendor/**", "generated/**"]);
     }
 }

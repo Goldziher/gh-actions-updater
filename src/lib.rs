@@ -3,6 +3,7 @@ mod cache;
 mod cli;
 mod config;
 mod discover;
+mod init;
 mod metadata;
 mod report;
 mod rewrite;
@@ -16,6 +17,14 @@ use std::io;
 
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
+    if cli.init {
+        if let Err(error) = init::run(&cli).context("failed to initialize configuration") {
+            eprintln!("{error:#}");
+            std::process::exit(2);
+        }
+        return Ok(());
+    }
+
     let settings = match config::Settings::resolve(&cli).context("failed to resolve configuration")
     {
         Ok(settings) => settings,
@@ -24,6 +33,15 @@ pub fn run() -> Result<()> {
             std::process::exit(2);
         }
     };
+    if let Some(threads) = settings.threads {
+        if let Err(error) = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build_global()
+        {
+            eprintln!("failed to configure rayon thread pool: {error}");
+            std::process::exit(2);
+        }
+    }
     let cache = match cache::CacheState::prepare(&settings).context("failed to prepare cache") {
         Ok(cache) => cache,
         Err(error) => {
@@ -45,6 +63,7 @@ pub fn run() -> Result<()> {
             std::process::exit(3);
         }
     };
+    let has_scan_failures = scanner::has_scan_failure_diagnostics(&scan.diagnostics);
     if settings.strict_schema && scanner::has_schema_diagnostics(&scan.diagnostics) {
         let report = RunReport::from_scan(
             env!("CARGO_PKG_VERSION"),
@@ -93,6 +112,10 @@ pub fn run() -> Result<()> {
     );
     report.set_rewrite_result(rewrite_result);
     report.write(&mut io::stdout(), &mut io::stderr())?;
+
+    if has_scan_failures {
+        std::process::exit(3);
+    }
 
     if let Some(exit_code) = exit_code {
         std::process::exit(exit_code);

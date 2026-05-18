@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use glob::glob;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
+use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 
 pub fn discover_files(settings: &Settings) -> Result<Vec<PathBuf>> {
@@ -15,47 +16,66 @@ pub fn discover_files(settings: &Settings) -> Result<Vec<PathBuf>> {
         settings.paths.iter().map(PathBuf::from).collect()
     };
 
-    let mut files = Vec::new();
-    for root in roots {
-        if root.is_file() {
-            push_explicit_file(&mut files, &root, &exclude);
-            continue;
-        }
-
-        if !root.exists() && has_glob_meta(&root) {
-            for entry in glob(&root.to_string_lossy())
-                .with_context(|| format!("invalid glob {}", root.display()))?
-            {
-                let path =
-                    entry.with_context(|| format!("failed to read glob {}", root.display()))?;
-                if path.is_file() {
-                    push_explicit_file(&mut files, &path, &exclude);
-                }
-            }
-            continue;
-        }
-
-        let walker = WalkBuilder::new(&root)
-            .hidden(false)
-            .git_ignore(true)
-            .git_global(true)
-            .git_exclude(true)
-            .build();
-
-        for entry in walker {
-            let entry = entry.with_context(|| format!("failed to walk {}", root.display()))?;
-            if entry
-                .file_type()
-                .is_some_and(|file_type| file_type.is_file())
-            {
-                push_if_match(&mut files, entry.path(), &root, &include, &exclude);
-            }
-        }
-    }
+    let discovered: Result<Vec<Vec<PathBuf>>> = roots
+        .par_iter()
+        .map(|root| discover_root(root, &include, &exclude, settings.recursive))
+        .collect();
+    let mut files: Vec<PathBuf> = discovered?.into_iter().flatten().collect();
 
     let mut seen = AHashSet::with_capacity(files.len());
     files.retain(|path| seen.insert(normalize(path)));
     files.sort();
+    Ok(files)
+}
+
+fn discover_root(
+    root: &Path,
+    include: &GlobSet,
+    exclude: &GlobSet,
+    recursive: bool,
+) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    if root.is_file() {
+        push_explicit_file(&mut files, root, exclude);
+        return Ok(files);
+    }
+
+    if !root.exists() && has_glob_meta(root) {
+        for entry in glob(&root.to_string_lossy())
+            .with_context(|| format!("invalid glob {}", root.display()))?
+        {
+            let path = entry.with_context(|| format!("failed to read glob {}", root.display()))?;
+            if path.is_file() {
+                push_explicit_file(&mut files, &path, exclude);
+            }
+        }
+        return Ok(files);
+    }
+
+    let match_base = match_base(root);
+    let walker = WalkBuilder::new(root)
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .build();
+
+    for entry in walker {
+        let entry = entry.with_context(|| format!("failed to walk {}", root.display()))?;
+        if entry
+            .file_type()
+            .is_some_and(|file_type| file_type.is_file())
+        {
+            push_if_match(
+                &mut files,
+                entry.path(),
+                &match_base,
+                include,
+                exclude,
+                recursive,
+            );
+        }
+    }
     Ok(files)
 }
 
@@ -72,14 +92,27 @@ fn push_if_match(
     base: &Path,
     include: &GlobSet,
     exclude: &GlobSet,
+    recursive: bool,
 ) {
     let root_relative = normalize(path.strip_prefix(base).unwrap_or(path));
     let normalized = normalize(path);
     if is_candidate_file(path)
-        && (include.is_match(&root_relative) || matches_glob_or_suffix(include, &normalized))
+        && (include.is_match(&root_relative)
+            || (recursive && matches_glob_or_suffix(include, &normalized)))
+        && !exclude.is_match(&root_relative)
         && !matches_glob_or_suffix(exclude, &normalized)
     {
         files.push(path.to_path_buf());
+    }
+}
+
+fn match_base(root: &Path) -> PathBuf {
+    if root.file_name().and_then(|name| name.to_str()) == Some(".github") {
+        root.parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."))
+    } else {
+        root.to_path_buf()
     }
 }
 
@@ -152,6 +185,7 @@ mod tests {
             refresh_cache: false,
             update: false,
             latest_hash: false,
+            update_exclude: Vec::new(),
             missing_ref: MissingRefPolicy::Warn,
             include_prereleases: false,
             preserve_major: true,
@@ -167,6 +201,8 @@ mod tests {
             github_api_url: "https://api.github.com".to_string(),
             strict_schema: false,
             schema_validation: false,
+            recursive: false,
+            threads: None,
         }
     }
 
@@ -230,5 +266,39 @@ mod tests {
 
         let files = discover_files(&settings).unwrap();
         assert_eq!(files, vec![a]);
+    }
+
+    #[test]
+    fn default_directory_scan_does_not_recurse_into_nested_dot_github() {
+        let temp = tempfile::tempdir().unwrap();
+        let root_workflow = temp.path().join(".github/workflows/root.yml");
+        let nested_workflow = temp
+            .path()
+            .join("vendor/project/.github/workflows/nested.yml");
+        fs::create_dir_all(root_workflow.parent().unwrap()).unwrap();
+        fs::create_dir_all(nested_workflow.parent().unwrap()).unwrap();
+        fs::write(&root_workflow, "name: root").unwrap();
+        fs::write(&nested_workflow, "name: nested").unwrap();
+
+        let files = discover_files(&settings(temp.path())).unwrap();
+        assert_eq!(files, vec![root_workflow]);
+    }
+
+    #[test]
+    fn recursive_directory_scan_includes_nested_dot_github() {
+        let temp = tempfile::tempdir().unwrap();
+        let root_workflow = temp.path().join(".github/workflows/root.yml");
+        let nested_workflow = temp
+            .path()
+            .join("vendor/project/.github/workflows/nested.yml");
+        fs::create_dir_all(root_workflow.parent().unwrap()).unwrap();
+        fs::create_dir_all(nested_workflow.parent().unwrap()).unwrap();
+        fs::write(&root_workflow, "name: root").unwrap();
+        fs::write(&nested_workflow, "name: nested").unwrap();
+        let mut settings = settings(temp.path());
+        settings.recursive = true;
+
+        let files = discover_files(&settings).unwrap();
+        assert_eq!(files, vec![root_workflow, nested_workflow]);
     }
 }

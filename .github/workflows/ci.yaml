@@ -62,7 +62,7 @@ jobs:
           set -euo pipefail
           node --check npm-package/index.js
           node --check npm-package/install.js
-          node --check npm-package/bin/gh-actions-updater
+          node --check npm-package/bin/gau
           export npm_config_cache="${RUNNER_TEMP}/npm-cache"
           cd npm-package
           npm pack --dry-run

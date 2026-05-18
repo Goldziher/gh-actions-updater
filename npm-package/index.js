@@ -3,7 +3,7 @@ const os = require("node:os");
 
 function binaryPath() {
   const suffix = os.type() === "Windows_NT" ? ".exe" : "";
-  return path.join(__dirname, "vendor", `gh-actions-updater${suffix}`);
+  return path.join(__dirname, "vendor", `gau${suffix}`);
 }
 
 module.exports = { binaryPath };

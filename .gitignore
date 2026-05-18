@@ -7,3 +7,14 @@
 /pip-package/dist
 /pip-package/*.egg-info
 __pycache__/
+.rumdl_cache/
+
+# BEGIN ai-rulez (DO NOT EDIT - managed by ai-rulez)
+.agents/
+.claude/
+.codex/
+.gemini/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+# END ai-rulez

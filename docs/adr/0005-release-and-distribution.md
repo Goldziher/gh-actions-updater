@@ -1,6 +1,6 @@
 # ADR 0005: Release And Distribution
 
-Status: Accepted for v0.1.0 implementation
+Status: Accepted for v0.1.1 implementation
 
 ## Context
 
@@ -25,6 +25,9 @@ Distribution targets:
 - Homebrew formula plus bottles in `Goldziher/homebrew-tap`
 - npm wrapper package `gh-actions-updater`
 - PyPI wrapper package `gh-actions-updater`
+
+Package names stay `gh-actions-updater`; the distributed command installed by
+all package managers is `gau`.
 
 Release flow requirements:
 

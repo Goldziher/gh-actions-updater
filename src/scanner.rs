@@ -2,6 +2,7 @@ use crate::action_ref::{ParsedRef, ReferenceKind, parse_uses};
 use crate::config::Settings;
 use anyhow::{Context, Result};
 use memchr::memmem;
+use rayon::prelude::*;
 use saphyr::{AnnotatedMapping, LoadableYamlNode, MarkedYaml, Scalar, Yaml};
 use serde::Serialize;
 use serde_json::{Map, Number, Value};
@@ -37,6 +38,8 @@ pub struct ReferenceReport {
     pub rewrite_supported: bool,
     #[serde(skip)]
     pub rewrite_reason: Option<String>,
+    #[serde(skip)]
+    pub update_ignored: bool,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -59,6 +62,7 @@ pub enum DiagnosticCategory {
     #[default]
     General,
     Schema,
+    ScanFailure,
 }
 
 #[derive(Debug, Default)]
@@ -70,12 +74,17 @@ pub struct ScanOutput {
 
 pub fn scan_files(paths: &[PathBuf], settings: &Settings) -> Result<ScanOutput> {
     let mut output = ScanOutput::default();
+    let scanned: Vec<ScanFileResult> = paths
+        .par_iter()
+        .map(|path| scan_file(path, settings))
+        .collect();
 
-    for path in paths {
-        let kind = classify_file(path);
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("failed to read {}", path.display()))?;
-        let references = scan_content(path, kind, &content)?;
+    for scanned_file in scanned {
+        if let Some(diagnostic) = scanned_file.failure {
+            output.diagnostics.push(diagnostic);
+            continue;
+        }
+        let references = scanned_file.references;
         for reference in &references {
             if reference.parsed.kind == ReferenceKind::Malformed {
                 output.diagnostics.push(Diagnostic {
@@ -88,26 +97,89 @@ pub fn scan_files(paths: &[PathBuf], settings: &Settings) -> Result<ScanOutput> 
         }
 
         output.files.push(FileReport {
-            path: path.display().to_string(),
-            kind,
+            path: scanned_file.path,
+            kind: scanned_file.kind,
             references: references.len(),
         });
         output.references.extend(references);
-
-        if settings.schema_validation {
-            output
-                .diagnostics
-                .extend(schema_diagnostics(path, kind, &content, settings));
-        }
+        output.diagnostics.extend(scanned_file.diagnostics);
     }
 
     Ok(output)
+}
+
+struct ScanFileResult {
+    path: String,
+    kind: FileKind,
+    references: Vec<ReferenceReport>,
+    diagnostics: Vec<Diagnostic>,
+    failure: Option<Diagnostic>,
+}
+
+fn scan_file(path: &Path, settings: &Settings) -> ScanFileResult {
+    let kind = classify_file(path);
+    let path_string = path.display().to_string();
+    let content = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) => {
+            return ScanFileResult {
+                path: path_string.clone(),
+                kind,
+                references: Vec::new(),
+                diagnostics: Vec::new(),
+                failure: Some(Diagnostic {
+                    file: path_string,
+                    line: None,
+                    message: format!("failed to read file: {error}"),
+                    category: DiagnosticCategory::ScanFailure,
+                }),
+            };
+        }
+    };
+
+    let references = match scan_content(path, kind, &content) {
+        Ok(references) => references,
+        Err(error) => {
+            return ScanFileResult {
+                path: path_string.clone(),
+                kind,
+                references: Vec::new(),
+                diagnostics: Vec::new(),
+                failure: Some(Diagnostic {
+                    file: path_string,
+                    line: None,
+                    message: error.to_string(),
+                    category: DiagnosticCategory::ScanFailure,
+                }),
+            };
+        }
+    };
+
+    let diagnostics = if settings.schema_validation {
+        schema_diagnostics(path, kind, &content, settings)
+    } else {
+        Vec::new()
+    };
+
+    ScanFileResult {
+        path: path_string,
+        kind,
+        references,
+        diagnostics,
+        failure: None,
+    }
 }
 
 pub fn has_schema_diagnostics(diagnostics: &[Diagnostic]) -> bool {
     diagnostics
         .iter()
         .any(|diagnostic| diagnostic.category == DiagnosticCategory::Schema)
+}
+
+pub fn has_scan_failure_diagnostics(diagnostics: &[Diagnostic]) -> bool {
+    diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.category == DiagnosticCategory::ScanFailure)
 }
 
 fn classify_file(path: &Path) -> FileKind {
@@ -156,6 +228,7 @@ fn scan_content(path: &Path, kind: FileKind, content: &str) -> Result<Vec<Refere
             ref_span,
             rewrite_supported,
             rewrite_reason,
+            update_ignored: value.update_ignored,
         });
     }
     Ok(references)
@@ -167,6 +240,7 @@ struct UseValue {
     line: usize,
     column: usize,
     value_span: Option<ByteSpan>,
+    update_ignored: bool,
 }
 
 fn collect_workflow_uses(yaml: &MarkedYaml<'_>, content: &str, values: &mut Vec<UseValue>) {
@@ -226,13 +300,27 @@ fn collect_string_field(
             .unwrap_or_default();
         let value_span = find_value_span(value_node, &raw)
             .and_then(|span| find_value_span_in_source(content, span, &raw));
+        let update_ignored = line_has_ignore_comment(content, key_node.span.start.line());
         values.push(UseValue {
             raw,
             line: key_node.span.start.line(),
             column: key_node.span.start.col(),
             value_span,
+            update_ignored,
         });
     }
+}
+
+fn line_has_ignore_comment(content: &str, line: usize) -> bool {
+    let Some(line_content) = content.lines().nth(line.saturating_sub(1)) else {
+        return false;
+    };
+    let Some((_, comment)) = line_content.split_once('#') else {
+        return false;
+    };
+    comment.contains("gau: ignore")
+        || comment.contains("gh-actions-updater: ignore")
+        || comment.contains("ghau: ignore")
 }
 
 fn mapping_get_marked<'a>(value: &'a MarkedYaml<'_>, key: &str) -> Option<&'a MarkedYaml<'a>> {
@@ -516,6 +604,23 @@ jobs:
         .unwrap();
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].parsed.kind, ReferenceKind::Malformed);
+    }
+
+    #[test]
+    fn detects_inline_update_ignore_comment() {
+        let content = r#"
+jobs:
+  test:
+    steps:
+      - uses: actions/checkout@v4 # gau: ignore
+"#;
+        let refs = scan_content(
+            Path::new(".github/workflows/ci.yml"),
+            FileKind::Workflow,
+            content,
+        )
+        .unwrap();
+        assert!(refs[0].update_ignored);
     }
 
     #[test]

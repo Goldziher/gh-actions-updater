@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gh-actions-updater"
-version = "0.1.0"
+version = "0.1.1"
 description = "Fast GitHub Actions reference scanner and updater"
 readme = "README.md"
 license = { text = "MIT" }
@@ -38,7 +38,7 @@ Repository = "https://github.com/Goldziher/gh-actions-updater.git"
 Issues = "https://github.com/Goldziher/gh-actions-updater/issues"
 
 [project.scripts]
-gh-actions-updater = "gh_actions_updater.cli:main"
+gau = "gh_actions_updater.cli:main"
 
 [tool.setuptools]
 packages = ["gh_actions_updater"]

@@ -9,7 +9,8 @@ const tar = require("tar");
 
 const { version } = require("./package.json");
 
-const BINARY_NAME = "gh-actions-updater";
+const ASSET_NAME = "gh-actions-updater";
+const BINARY_NAME = "gau";
 const REPO = "Goldziher/gh-actions-updater";
 
 function platformTriple() {
@@ -41,7 +42,7 @@ function releaseTag() {
 function binaryUrl() {
   const triple = platformTriple();
   const extension = triple.includes("windows") ? "zip" : "tar.gz";
-  return `https://github.com/${REPO}/releases/download/${releaseTag()}/${BINARY_NAME}-${triple}.${extension}`;
+  return `https://github.com/${REPO}/releases/download/${releaseTag()}/${ASSET_NAME}-${triple}.${extension}`;
 }
 
 function checksumsUrl() {

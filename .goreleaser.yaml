@@ -9,7 +9,7 @@ before:
 
 builds:
   - builder: rust
-    binary: gh-actions-updater
+    binary: gau
     flags:
       - --release
       - --locked
@@ -65,6 +65,6 @@ brews:
       email: bot@goreleaser.com
     commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
     test: |
-      system "#{bin}/gh-actions-updater", "--version"
+      system "#{bin}/gau", "--version"
     install: |
-      bin.install "gh-actions-updater"
+      bin.install "gau"

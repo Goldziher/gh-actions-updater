@@ -12,6 +12,7 @@ use std::path::PathBuf;
 pub struct RunReport {
     pub version: String,
     pub changed: bool,
+    pub would_change: bool,
     pub summary: Summary,
     pub files: Vec<FileReport>,
     pub references: Vec<ReferenceReport>,
@@ -68,10 +69,14 @@ impl RunReport {
             settings.refresh_cache,
             settings.include_prereleases,
             settings.preserve_major,
+            settings.recursive,
+            settings.threads,
         );
+        let would_change = !resolution.updates.is_empty();
         Self {
             version: version.to_string(),
             changed: false,
+            would_change,
             summary: Summary {
                 files_scanned: scan.files.len(),
                 references_found,
@@ -95,6 +100,7 @@ impl RunReport {
 
     pub fn set_rewrite_result(&mut self, result: crate::rewrite::RewriteResult) {
         self.changed = result.changed;
+        self.would_change = result.would_change || !self.updates.is_empty();
         self.diagnostics.extend(result.diagnostics);
         self.diffs = result.diffs;
     }

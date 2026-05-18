@@ -3,7 +3,7 @@ use std::fs;
 use std::process::Command;
 
 fn binary() -> &'static str {
-    env!("CARGO_BIN_EXE_gh-actions-updater")
+    env!("CARGO_BIN_EXE_gau")
 }
 
 #[test]
@@ -61,6 +61,7 @@ jobs:
     let value: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(value["changed"], false);
+    assert_eq!(value["would_change"], false);
     assert_eq!(value["summary"]["files_scanned"], 1);
     assert_eq!(value["summary"]["references_found"], 1);
     assert_eq!(value["summary"]["updates_available"], 0);
@@ -69,6 +70,43 @@ jobs:
     assert!(value["updates"].is_array());
     assert!(value["diagnostics"].is_array());
     assert!(value["cache"].is_object());
+}
+
+#[test]
+fn init_writes_config_and_requires_force_for_overwrite() {
+    let temp = tempfile::tempdir().unwrap();
+    let config = temp.path().join(".gh-actions-updater.toml");
+
+    let output = Command::new(binary())
+        .arg("--init")
+        .arg("--output")
+        .arg(&config)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let content = fs::read_to_string(&config).unwrap();
+    assert!(content.contains("[scan]"));
+    assert!(content.contains("recursive = false"));
+
+    let output = Command::new(binary())
+        .arg("--init")
+        .arg("--output")
+        .arg(&config)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+
+    let output = Command::new(binary())
+        .arg("--init")
+        .arg("--recursive")
+        .arg("--force")
+        .arg("--output")
+        .arg(&config)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let content = fs::read_to_string(&config).unwrap();
+    assert!(content.contains("recursive = true"));
 }
 
 #[test]

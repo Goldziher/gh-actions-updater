@@ -6,6 +6,7 @@ use crate::report::UpdateReport;
 use crate::scanner::{Diagnostic, DiagnosticCategory, ReferenceReport};
 use ahash::AHashMap;
 use anyhow::{Context, Result, anyhow};
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
@@ -377,6 +378,7 @@ pub fn resolve_updates_with_provider(
     let mut diagnostics = Vec::new();
     let mut updates = Vec::new();
     let mut tags_by_repo: AHashMap<(String, String), TagLoad> = AHashMap::new();
+    let update_exclude = build_update_exclude_globset(&settings.update_exclude)?;
 
     for reference in references {
         if !matches!(
@@ -393,6 +395,12 @@ pub fn resolve_updates_with_provider(
         ) else {
             continue;
         };
+
+        if reference.update_ignored
+            || is_update_excluded(&update_exclude, reference.raw.as_str(), owner, repo)
+        {
+            continue;
+        }
 
         let update_candidate = if settings.latest_hash {
             matches!(
@@ -478,6 +486,22 @@ pub fn resolve_updates_with_provider(
         diagnostics,
         cache: cache.report,
     })
+}
+
+fn build_update_exclude_globset(patterns: &[String]) -> Result<GlobSet> {
+    let mut builder = GlobSetBuilder::new();
+    for pattern in patterns {
+        builder.add(
+            Glob::new(pattern).with_context(|| format!("invalid update exclude glob {pattern}"))?,
+        );
+    }
+    builder
+        .build()
+        .context("failed to build update exclude glob set")
+}
+
+fn is_update_excluded(globset: &GlobSet, raw: &str, owner: &str, repo: &str) -> bool {
+    globset.is_match(raw) || globset.is_match(format!("{owner}/{repo}"))
 }
 
 fn load_tags(
@@ -1132,6 +1156,7 @@ mod tests {
             refresh_cache: false,
             update: false,
             latest_hash: false,
+            update_exclude: Vec::new(),
             missing_ref: MissingRefPolicy::Warn,
             include_prereleases: false,
             preserve_major: true,
@@ -1147,6 +1172,8 @@ mod tests {
             github_api_url: "https://api.github.com".to_string(),
             strict_schema: false,
             schema_validation: false,
+            recursive: false,
+            threads: None,
         }
     }
 
@@ -1160,6 +1187,7 @@ mod tests {
             ref_span: None,
             rewrite_supported: false,
             rewrite_reason: None,
+            update_ignored: false,
         }
     }
 
@@ -1205,6 +1233,51 @@ mod tests {
             &settings,
             CacheState::prepare(&settings).unwrap(),
             &[reference("actions/checkout@main")],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(resolution.updates.is_empty());
+        assert_eq!(provider.calls.get(), 0);
+    }
+
+    #[test]
+    fn config_update_exclude_skips_matching_action_before_metadata_fetch() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.update_exclude = vec!["actions/checkout".to_string()];
+        let provider = FakeProvider {
+            tags: vec![tag("v4.1.0")],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("actions/checkout@v4")],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(resolution.updates.is_empty());
+        assert_eq!(provider.calls.get(), 0);
+    }
+
+    #[test]
+    fn inline_ignore_skips_update_before_metadata_fetch() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = settings(temp.path());
+        let provider = FakeProvider {
+            tags: vec![tag("v4.1.0")],
+            calls: Cell::new(0),
+        };
+        let mut reference = reference("actions/checkout@v4");
+        reference.update_ignored = true;
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference],
             &provider,
         )
         .unwrap();

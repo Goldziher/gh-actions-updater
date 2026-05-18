@@ -8,6 +8,7 @@ use std::fs;
 #[derive(Debug, Default)]
 pub struct RewriteResult {
     pub changed: bool,
+    pub would_change: bool,
     pub diagnostics: Vec<Diagnostic>,
     pub diffs: Vec<String>,
 }
@@ -101,14 +102,15 @@ pub fn apply_updates(settings: &Settings, updates: &[UpdateReport]) -> Result<Re
             continue;
         }
 
-        result.changed = true;
+        result.would_change = true;
         if settings.diff {
             result
                 .diffs
-                .push(render_full_file_diff(file, &original, &rewritten));
+                .push(render_unified_diff(file, &original, &rewritten));
         }
         if !settings.dry_run {
             fs::write(file, rewritten).with_context(|| format!("failed to write {file}"))?;
+            result.changed = true;
         }
     }
 
@@ -130,28 +132,99 @@ fn spans_are_valid(content: &str, replacements: &[Replacement]) -> bool {
     })
 }
 
-fn render_full_file_diff(file: &str, original: &str, rewritten: &str) -> String {
-    let original_line_count = original.lines().count().max(1);
-    let rewritten_line_count = rewritten.lines().count().max(1);
+fn render_unified_diff(file: &str, original: &str, rewritten: &str) -> String {
+    let original_lines: Vec<&str> = original.lines().collect();
+    let rewritten_lines: Vec<&str> = rewritten.lines().collect();
+    let mut prefix = 0;
+    while prefix < original_lines.len()
+        && prefix < rewritten_lines.len()
+        && original_lines[prefix] == rewritten_lines[prefix]
+    {
+        prefix += 1;
+    }
+
+    let mut suffix = 0;
+    while suffix < original_lines.len().saturating_sub(prefix)
+        && suffix < rewritten_lines.len().saturating_sub(prefix)
+        && original_lines[original_lines.len() - 1 - suffix]
+            == rewritten_lines[rewritten_lines.len() - 1 - suffix]
+    {
+        suffix += 1;
+    }
+
+    let context = 3;
+    let original_change_end = original_lines.len() - suffix;
+    let rewritten_change_end = rewritten_lines.len() - suffix;
+    let hunk_start = prefix.saturating_sub(context);
+    let original_hunk_end = (original_change_end + context).min(original_lines.len());
+    let rewritten_hunk_end = (rewritten_change_end + context).min(rewritten_lines.len());
+    let original_count = original_hunk_end.saturating_sub(hunk_start).max(1);
+    let rewritten_count = rewritten_hunk_end.saturating_sub(hunk_start).max(1);
+    let diff_path = diff_path(file);
+
     format!(
-        "diff --git a/{file} b/{file}\n--- a/{file}\n+++ b/{file}\n@@ -1,{original_line_count} +1,{rewritten_line_count} @@\n{}",
-        render_diff_body(original, rewritten)
+        "diff --git a/{diff_path} b/{diff_path}\n--- a/{diff_path}\n+++ b/{diff_path}\n@@ -{},{} +{},{} @@\n{}",
+        hunk_start + 1,
+        original_count,
+        hunk_start + 1,
+        rewritten_count,
+        render_diff_hunk(
+            &original_lines,
+            &rewritten_lines,
+            DiffWindow {
+                hunk_start,
+                change_start: prefix,
+                original_change_end,
+                rewritten_change_end,
+                original_hunk_end,
+                rewritten_hunk_end,
+            },
+        )
     )
 }
 
-fn render_diff_body(original: &str, rewritten: &str) -> String {
+struct DiffWindow {
+    hunk_start: usize,
+    change_start: usize,
+    original_change_end: usize,
+    rewritten_change_end: usize,
+    original_hunk_end: usize,
+    rewritten_hunk_end: usize,
+}
+
+fn render_diff_hunk(
+    original_lines: &[&str],
+    rewritten_lines: &[&str],
+    window: DiffWindow,
+) -> String {
     let mut body = String::new();
-    for line in original.lines() {
+    for line in &original_lines[window.hunk_start..window.change_start] {
+        body.push(' ');
+        body.push_str(line);
+        body.push('\n');
+    }
+    for line in &original_lines[window.change_start..window.original_change_end] {
         body.push('-');
         body.push_str(line);
         body.push('\n');
     }
-    for line in rewritten.lines() {
+    for line in &rewritten_lines[window.change_start..window.rewritten_change_end] {
         body.push('+');
         body.push_str(line);
         body.push('\n');
     }
+    let original_tail = &original_lines[window.original_change_end..window.original_hunk_end];
+    let rewritten_tail = &rewritten_lines[window.rewritten_change_end..window.rewritten_hunk_end];
+    for line in original_tail.iter().take(rewritten_tail.len()) {
+        body.push(' ');
+        body.push_str(line);
+        body.push('\n');
+    }
     body
+}
+
+fn diff_path(file: &str) -> &str {
+    file.trim_start_matches('/')
 }
 
 #[cfg(test)]
@@ -175,6 +248,7 @@ mod tests {
             refresh_cache: false,
             update: !dry_run,
             latest_hash: false,
+            update_exclude: Vec::new(),
             missing_ref: MissingRefPolicy::Warn,
             include_prereleases: false,
             preserve_major: true,
@@ -190,6 +264,8 @@ mod tests {
             github_api_url: "https://api.github.com".to_string(),
             strict_schema: false,
             schema_validation: false,
+            recursive: false,
+            threads: None,
         }
     }
 
@@ -216,6 +292,7 @@ mod tests {
         let result = apply_updates(&settings(temp.path(), false, false), &[update]).unwrap();
 
         assert!(result.changed);
+        assert!(result.would_change);
         assert_eq!(
             fs::read_to_string(path).unwrap(),
             "jobs:\n  test:\n    steps:\n      - uses: actions/checkout@v4.2.0\n"
@@ -244,8 +321,10 @@ mod tests {
 
         let result = apply_updates(&settings(temp.path(), true, true), &[update]).unwrap();
 
-        assert!(result.changed);
+        assert!(!result.changed);
+        assert!(result.would_change);
         assert_eq!(fs::read_to_string(path).unwrap(), content);
         assert!(result.diffs[0].contains("actions/checkout@v4.2.0"));
+        assert!(!result.diffs[0].contains("a//"));
     }
 }

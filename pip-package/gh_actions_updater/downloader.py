@@ -16,7 +16,8 @@ from urllib.request import Request, urlopen
 
 import certifi
 
-BINARY_NAME = "gh-actions-updater"
+ASSET_NAME = "gh-actions-updater"
+BINARY_NAME = "gau"
 REPO = "Goldziher/gh-actions-updater"
 
 
@@ -57,7 +58,7 @@ def _asset(version: str) -> tuple[str, str]:
     extension = "zip" if "windows" in triple else "tar.gz"
     url = (
         f"https://github.com/{REPO}/releases/download/"
-        f"v{tag}/{BINARY_NAME}-{triple}.{extension}"
+        f"v{tag}/{ASSET_NAME}-{triple}.{extension}"
     )
     return url, extension
 
