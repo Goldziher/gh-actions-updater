@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.2] - 2026-05-18
+
+### Fixed
+
+- Scanner now robustly handles cases where YAML parser spans don't match source
+  exactly. A fallback mechanism searches for the `@` symbol directly within the
+  parsed span when source matching fails, enabling updates for bare `uses:` lines,
+  sub-path actions (e.g. `gradle/actions/setup-gradle@v6`), and other edge cases
+  where the parser and source normalization diverge.
+
 ## [0.1.1] - 2026-05-18
 
 ### Added

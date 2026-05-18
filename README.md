@@ -1,6 +1,6 @@
 # gh-actions-updater
 
-Version: `0.1.1`
+Version: `0.1.2`
 
 `gh-actions-updater` is the package. `gau` is the CLI command.
 
@@ -246,7 +246,7 @@ JSON output includes:
 
 ```json
 {
-  "version": "0.1.1",
+  "version": "0.1.2",
   "changed": false,
   "would_change": false,
   "summary": {
@@ -277,7 +277,7 @@ or a dry-run/diff would modify files.
 ```yaml
 repos:
   - repo: https://github.com/Goldziher/gh-actions-updater
-    rev: v0.1.1
+    rev: v0.1.2
     hooks:
       - id: gh-actions-updater
 ```
