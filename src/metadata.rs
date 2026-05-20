@@ -841,7 +841,8 @@ fn select_tag_update_target(
         }
     }
 
-    let target = latest_semver_tag(settings, tags, Some(current_version.major));
+    let target = exact_major_version_tag(tags, current)
+        .or_else(|| latest_semver_tag(settings, tags, Some(current_version.major)));
 
     Ok(TargetDecision {
         target,
@@ -944,6 +945,14 @@ fn latest_semver_tag(
         .filter(|(_, version)| settings.include_prereleases || version.pre.is_empty())
         .max_by(|(_, left), (_, right)| left.cmp(right))
         .map(|(tag, _)| tag.clone())
+}
+
+fn exact_major_version_tag(tags: &[RemoteTag], current: &str) -> Option<RemoteTag> {
+    let version = current.strip_prefix('v').unwrap_or(current);
+    if version.is_empty() || !version.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    tags.iter().find(|tag| tag.name == current).cloned()
 }
 
 pub fn exit_code_for_resolution(
@@ -1199,7 +1208,7 @@ mod tests {
     }
 
     #[test]
-    fn selects_latest_same_major_tag() {
+    fn accepts_existing_major_only_tag() {
         let temp = tempfile::tempdir().unwrap();
         let settings = settings(temp.path());
         let provider = FakeProvider {
@@ -1211,6 +1220,33 @@ mod tests {
             &settings,
             CacheState::prepare(&settings).unwrap(),
             &[reference("actions/checkout@v4")],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(resolution.updates.is_empty());
+        assert_eq!(provider.calls.get(), 1);
+    }
+
+    #[test]
+    fn selects_latest_same_major_tag_for_full_version() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = settings(temp.path());
+        let provider = FakeProvider {
+            tags: vec![
+                tag("v3"),
+                tag("v4"),
+                tag("v4.0.1"),
+                tag("v4.1.0"),
+                tag("v5"),
+            ],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("actions/checkout@v4.0.1")],
             &provider,
         )
         .unwrap();
@@ -1287,7 +1323,7 @@ mod tests {
     }
 
     #[test]
-    fn latest_hash_pins_selected_tag_sha() {
+    fn latest_hash_pins_existing_major_only_tag_sha() {
         let temp = tempfile::tempdir().unwrap();
         let mut settings = settings(temp.path());
         settings.latest_hash = true;
@@ -1309,7 +1345,7 @@ mod tests {
 
         assert_eq!(
             resolution.updates[0].target.as_deref(),
-            Some("2222222222222222222222222222222222222222")
+            Some("1111111111111111111111111111111111111111")
         );
     }
 
@@ -1382,7 +1418,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let settings = settings(temp.path());
         let provider = FakeProvider {
-            tags: vec![tag("v4"), tag("v4.2.0")],
+            tags: vec![tag("v4.0.0"), tag("v4.2.0")],
             calls: Cell::new(0),
         };
 
@@ -1390,7 +1426,7 @@ mod tests {
         let first = resolve_updates_with_provider(
             &settings,
             cache,
-            &[reference("actions/checkout@v4")],
+            &[reference("actions/checkout@v4.0.0")],
             &provider,
         )
         .unwrap();
@@ -1399,7 +1435,7 @@ mod tests {
         let second = resolve_updates_with_provider(
             &settings,
             CacheState::prepare(&settings).unwrap(),
-            &[reference("actions/checkout@v4")],
+            &[reference("actions/checkout@v4.0.0")],
             &provider,
         )
         .unwrap();
@@ -1415,14 +1451,14 @@ mod tests {
         let key = tags_cache_key("actions", "checkout");
         std::fs::write(settings.cache_dir.join(format!("{key}.json")), b"not json").unwrap();
         let provider = FakeProvider {
-            tags: vec![tag("v4"), tag("v4.2.0")],
+            tags: vec![tag("v4.0.0"), tag("v4.2.0")],
             calls: Cell::new(0),
         };
 
         let resolution = resolve_updates_with_provider(
             &settings,
             CacheState::prepare(&settings).unwrap(),
-            &[reference("actions/checkout@v4")],
+            &[reference("actions/checkout@v4.0.0")],
             &provider,
         )
         .unwrap();
@@ -1448,7 +1484,7 @@ mod tests {
                     "api_host": "https://api.github.com",
                     "auth_fingerprint": "anonymous",
                     "etag": "etag-test",
-                    "tags": [tag("v4"), tag("v4.2.0")]
+                    "tags": [tag("v4.0.0"), tag("v4.2.0")]
                 }
             })
             .to_string(),
@@ -1461,7 +1497,7 @@ mod tests {
         let resolution = resolve_updates_with_provider(
             &settings,
             CacheState::prepare(&settings).unwrap(),
-            &[reference("actions/checkout@v4")],
+            &[reference("actions/checkout@v4.0.0")],
             &provider,
         )
         .unwrap();

@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.3] - 2026-05-20
+
+### Changed
+
+- Pre-commit hook now runs `gau --update` so supported GitHub Actions refs are
+  autofixed during pre-commit.
+- Major-only tags such as `v6` are accepted as current when the exact remote tag
+  exists, avoiding rewrites to full patch tags such as `v6.0.2`.
+
 ## [0.1.2] - 2026-05-18
 
 ### Fixed

@@ -1,6 +1,6 @@
 {
   "name": "gh-actions-updater",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Fast GitHub Actions reference scanner and updater",
   "main": "index.js",
   "bin": {
