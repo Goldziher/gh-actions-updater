@@ -3,8 +3,12 @@ use ahash::AHashSet;
 use anyhow::{Context, Result};
 use glob::glob;
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use ignore::WalkBuilder;
+use ignore::{
+    DirEntry, Match, WalkBuilder,
+    gitignore::{Gitignore, GitignoreBuilder},
+};
 use rayon::prelude::*;
+use std::env;
 use std::path::{Path, PathBuf};
 
 pub fn discover_files(settings: &Settings) -> Result<Vec<PathBuf>> {
@@ -53,12 +57,21 @@ fn discover_root(
     }
 
     let match_base = match_base(root);
+    let parent_ignores = build_parent_ignores(root)?;
+    let root_for_matching = absolutize(root)?;
     let mut builder = WalkBuilder::new(root);
     builder
         .hidden(false)
-        .git_ignore(!recursive)
+        .parents(false)
+        .git_ignore(true)
         .git_global(true)
-        .git_exclude(true);
+        .git_exclude(true)
+        .require_git(false);
+    if !parent_ignores.is_empty() {
+        builder.filter_entry(move |entry| {
+            !is_ignored_by_parent(entry, &root_for_matching, &parent_ignores)
+        });
+    }
     let walker = builder.build();
 
     for entry in walker {
@@ -164,6 +177,75 @@ fn matches_glob_or_suffix(globset: &GlobSet, normalized: &str) -> bool {
     }
 
     false
+}
+
+#[derive(Clone, Debug)]
+struct ParentIgnore {
+    matcher: Gitignore,
+    root_ignore_globs: AHashSet<String>,
+}
+
+fn build_parent_ignores(root: &Path) -> Result<Vec<ParentIgnore>> {
+    let root = absolutize(root)?;
+    let mut ignores = Vec::new();
+
+    for parent in root.ancestors().skip(1) {
+        let ignore_file = parent.join(".gitignore");
+        if !ignore_file.is_file() {
+            continue;
+        }
+
+        let mut builder = GitignoreBuilder::new(parent);
+        if let Some(error) = builder.add(&ignore_file) {
+            return Err(error).with_context(|| format!("failed to read {}", ignore_file.display()));
+        }
+        let matcher = builder
+            .build()
+            .with_context(|| format!("failed to build ignore matcher for {}", parent.display()))?;
+        let mut root_ignore_globs = AHashSet::new();
+        if let Match::Ignore(glob) = matcher.matched(&root, true) {
+            root_ignore_globs.insert(glob.original().to_string());
+        }
+        ignores.push(ParentIgnore {
+            matcher,
+            root_ignore_globs,
+        });
+    }
+
+    Ok(ignores)
+}
+
+fn is_ignored_by_parent(entry: &DirEntry, root: &Path, parent_ignores: &[ParentIgnore]) -> bool {
+    let path = absolutize(entry.path()).unwrap_or_else(|_| entry.path().to_path_buf());
+    if path == root {
+        return false;
+    }
+
+    let is_dir = entry
+        .file_type()
+        .is_some_and(|file_type| file_type.is_dir());
+    for parent_ignore in parent_ignores {
+        match parent_ignore.matcher.matched(&path, is_dir) {
+            Match::Ignore(glob) if !parent_ignore.root_ignore_globs.contains(glob.original()) => {
+                return true;
+            }
+            Match::Ignore(_) | Match::Whitelist(_) => return false,
+            Match::None => {}
+        }
+    }
+
+    false
+}
+
+fn absolutize(path: &Path) -> Result<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        env::current_dir()
+            .context("failed to resolve current directory")?
+            .join(path)
+    };
+    Ok(absolute.components().collect())
 }
 
 #[cfg(test)]
@@ -273,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn recursive_directory_scan_includes_nested_repo_actions_surface() {
+    fn recursive_directory_scan_skips_ignored_nested_repo_actions_surface() {
         let temp = tempfile::tempdir().unwrap();
         let workflow = temp.path().join("nested-repo/.github/workflows/ci.yml");
         let action = temp
@@ -289,7 +371,45 @@ mod tests {
 
         let files = discover_files(&settings).unwrap();
 
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn recursive_directory_scan_allows_explicit_ignored_nested_repo() {
+        let temp = tempfile::tempdir().unwrap();
+        let nested = temp.path().join("nested-repo");
+        let workflow = nested.join(".github/workflows/ci.yml");
+        let action = nested.join(".github/actions/build/action.yml");
+        fs::create_dir_all(workflow.parent().unwrap()).unwrap();
+        fs::create_dir_all(action.parent().unwrap()).unwrap();
+        fs::write(&workflow, "name: ci").unwrap();
+        fs::write(&action, "name: build").unwrap();
+        fs::write(temp.path().join(".gitignore"), "/nested-repo/\n").unwrap();
+        let mut settings = settings(&nested);
+        settings.recursive = true;
+
+        let files = discover_files(&settings).unwrap();
+
         assert_eq!(files, vec![action, workflow]);
+    }
+
+    #[test]
+    fn recursive_directory_scan_respects_parent_gitignore_for_explicit_subdirectory() {
+        let temp = tempfile::tempdir().unwrap();
+        let subdir = temp.path().join("subdir");
+        let workflow = subdir.join(".github/workflows/ci.yml");
+        let ignored_workflow = subdir.join("vendor/pkg/.github/workflows/ci.yml");
+        fs::create_dir_all(workflow.parent().unwrap()).unwrap();
+        fs::create_dir_all(ignored_workflow.parent().unwrap()).unwrap();
+        fs::write(&workflow, "name: ci").unwrap();
+        fs::write(&ignored_workflow, "name: ignored").unwrap();
+        fs::write(temp.path().join(".gitignore"), "subdir/vendor/\n").unwrap();
+        let mut settings = settings(&subdir);
+        settings.recursive = true;
+
+        let files = discover_files(&settings).unwrap();
+
+        assert_eq!(files, vec![workflow]);
     }
 
     #[test]
@@ -314,7 +434,7 @@ mod tests {
         let root_workflow = temp.path().join(".github/workflows/root.yml");
         let nested_workflow = temp
             .path()
-            .join("vendor/project/.github/workflows/nested.yml");
+            .join("tools/project/.github/workflows/nested.yml");
         fs::create_dir_all(root_workflow.parent().unwrap()).unwrap();
         fs::create_dir_all(nested_workflow.parent().unwrap()).unwrap();
         fs::write(&root_workflow, "name: root").unwrap();
@@ -324,5 +444,35 @@ mod tests {
 
         let files = discover_files(&settings).unwrap();
         assert_eq!(files, vec![root_workflow, nested_workflow]);
+    }
+
+    #[test]
+    fn recursive_directory_scan_skips_ignored_dependency_and_vendor_trees() {
+        let temp = tempfile::tempdir().unwrap();
+        let root_workflow = temp.path().join(".github/workflows/root.yml");
+        let ignored_workflows = [
+            temp.path()
+                .join("node_modules/pkg/.github/workflows/ci.yml"),
+            temp.path().join("vendor/pkg/.github/workflows/ci.yml"),
+            temp.path()
+                .join("packages/ruby/vendor/bundle/pkg/.github/workflows/ci.yml"),
+        ];
+        fs::create_dir_all(root_workflow.parent().unwrap()).unwrap();
+        fs::write(&root_workflow, "name: root").unwrap();
+        for workflow in &ignored_workflows {
+            fs::create_dir_all(workflow.parent().unwrap()).unwrap();
+            fs::write(workflow, "name: ignored").unwrap();
+        }
+        fs::write(
+            temp.path().join(".gitignore"),
+            "node_modules/\nvendor/\npackages/ruby/vendor/bundle/\n",
+        )
+        .unwrap();
+        let mut settings = settings(temp.path());
+        settings.recursive = true;
+
+        let files = discover_files(&settings).unwrap();
+
+        assert_eq!(files, vec![root_workflow]);
     }
 }

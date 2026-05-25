@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.5] - 2026-05-25
+
+### Fixed
+
+- Recursive discovery now respects `.gitignore` while still allowing explicitly
+  invoked ignored files or directories to be scanned.
+
 ## [0.1.4] - 2026-05-25
 
 ### Added

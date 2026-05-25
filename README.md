@@ -1,6 +1,6 @@
 # gh-actions-updater
 
-Version: `0.1.4`
+Version: `0.1.5`
 
 `gh-actions-updater` is the package. `gau` is the CLI command.
 
@@ -58,7 +58,9 @@ only the current repository's GitHub Actions surface:
 - `action.yml`
 - `action.yaml`
 
-Use `-r, --recursive` to scan nested repositories or workspaces.
+Use `-r, --recursive` to scan nested repositories or workspaces. Recursive
+discovery respects `.gitignore`; pass an ignored file or directory explicitly
+when you want to scan it anyway.
 
 ## CLI Flags
 
@@ -70,7 +72,7 @@ Use `-r, --recursive` to scan nested repositories or workspaces.
 | `-c, --config <PATH>` | Load a specific TOML config file. |
 | `--include <GLOB>` | Add an include glob. Repeatable. |
 | `--exclude <GLOB>` | Add an exclude glob. Repeatable. |
-| `-r, --recursive` | Scan nested `.github` folders under input directories. |
+| `-r, --recursive` | Scan nested `.github` folders under input directories, respecting `.gitignore`. |
 | `--threads <N>` | Override Rayon thread count. Default uses available CPU cores. |
 | `--cache-dir <PATH>` | Override the global cache directory. |
 | `--cache-ttl <DURATION>` | Cache TTL such as `15m`, `6h`, `7d`, `0`, or `never`. |
@@ -252,7 +254,7 @@ JSON output includes:
 
 ```json
 {
-  "version": "0.1.4",
+  "version": "0.1.5",
   "changed": false,
   "would_change": false,
   "summary": {
@@ -283,7 +285,7 @@ or a dry-run/diff would modify files.
 ```yaml
 repos:
   - repo: https://github.com/Goldziher/gh-actions-updater
-    rev: v0.1.4
+    rev: v0.1.5
     hooks:
       - id: gh-actions-updater
 ```
