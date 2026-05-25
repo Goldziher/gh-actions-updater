@@ -27,7 +27,7 @@ Initial config sections:
 
 - `[scan]`: `include`, `exclude`, `recursive`
 - `[cache]`: `enabled`, `ttl`, `dir`
-- `[update]`: `mode`, `exclude`, `include_prereleases`, `preserve_major`, `missing_ref`
+- `[update]`: `mode`, `pin_style`, `exclude`, `include_prereleases`, `preserve_major`, `missing_ref`
 - `[github]`: `api_url`
 - `[output]`: `format`, `color`
 - `[performance]`: `threads`

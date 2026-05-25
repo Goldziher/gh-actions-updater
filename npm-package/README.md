@@ -21,6 +21,7 @@ gau --init
 gau --check .
 gau --update --diff .
 gau --latest-hash --update .
+gau --pin-style major --update .
 gau -r ~/workspace --check
 ```
 
@@ -42,6 +43,7 @@ Useful flags:
 - `--no-cache`: disable cache reads and writes
 - `--refresh-cache`: force fresh metadata
 - `-r, --recursive`: scan nested repositories/workspaces
+- `--pin-style <preserve|major|minor|full>`: control semver tag pin formatting
 - `--threads <N>`: override Rayon available-core default
 - `--format json`: machine-readable output
 

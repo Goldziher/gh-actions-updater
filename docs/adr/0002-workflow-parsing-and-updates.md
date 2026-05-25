@@ -69,6 +69,10 @@ Update semantics:
 
 - latest tag is the default target
 - semver-like tags preserve the current major version by default
+- semver-like tag formatting is preserved by default: major floats stay major
+  floats, minor floats stay minor floats, and full tags stay full tags
+- `--pin-style major`, `minor`, or `full` explicitly converts semver-like refs
+  to that formatting style in latest-tag mode
 - prerelease tags are ignored by default
 - branch refs are reported but not updated by default
 - SHA refs are reported but not updated by default
@@ -76,6 +80,7 @@ Update semantics:
 - deleted or missing remote tag refs are controlled by the missing-ref policy
 - `--latest-hash` selects the same tag as latest-tag mode, then pins the commit
   SHA behind that tag
+- `--latest-hash` is incompatible with non-preserve pin styles
 
 Missing-ref policy values:
 

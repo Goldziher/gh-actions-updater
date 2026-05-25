@@ -30,6 +30,7 @@ Supported flags:
 - `--no-cache`
 - `--update`
 - `--latest-hash`
+- `--pin-style <preserve|major|minor|full>`
 - `--missing-ref <warn|error|ignore|fallback>`
 - `--check`
 - `--dry-run`

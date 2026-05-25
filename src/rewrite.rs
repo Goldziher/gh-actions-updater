@@ -230,7 +230,7 @@ fn diff_path(file: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::apply_updates;
-    use crate::cli::{ColorChoice, MissingRefPolicy, OutputFormat};
+    use crate::cli::{ColorChoice, MissingRefPolicy, OutputFormat, PinStyle};
     use crate::config::{CacheTtl, Settings};
     use crate::report::UpdateReport;
     use crate::scanner::ByteSpan;
@@ -248,6 +248,7 @@ mod tests {
             refresh_cache: false,
             update: !dry_run,
             latest_hash: false,
+            pin_style: PinStyle::Preserve,
             update_exclude: Vec::new(),
             missing_ref: MissingRefPolicy::Warn,
             include_prereleases: false,

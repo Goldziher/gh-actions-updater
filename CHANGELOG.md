@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.4] - 2026-05-25
+
+### Added
+
+- Added `--pin-style <preserve|major|minor|full>` and `[update].pin_style`
+  for explicit semver pin formatting.
+- Added grouped, color-aware human output and fuller CLI help text.
+
+### Fixed
+
+- Floating semver pins such as `v1` and `v1.24` are now preserved by default,
+  avoiding false updates such as `v1.24 -> v1.24.0`.
+- Pin-style conversions now validate generated floating targets before
+  rewriting, preventing broken refs.
+- Recursive workspace scans now find nested repository Actions files even when
+  the workspace root ignores those nested repos.
+
 ## [0.1.3] - 2026-05-20
 
 ### Changed

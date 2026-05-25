@@ -29,7 +29,7 @@ jobs:
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("found 1 reference"));
+    assert!(stdout.contains("found 1 reference(s)"));
     assert!(stdout.contains("./.github/actions/local"));
 }
 
@@ -87,6 +87,7 @@ fn init_writes_config_and_requires_force_for_overwrite() {
     let content = fs::read_to_string(&config).unwrap();
     assert!(content.contains("[scan]"));
     assert!(content.contains("recursive = false"));
+    assert!(content.contains("pin_style = \"preserve\""));
 
     let output = Command::new(binary())
         .arg("--init")
@@ -133,4 +134,72 @@ jobs:
         .output()
         .unwrap();
     assert!(output.status.success());
+}
+
+#[test]
+fn pin_style_flag_is_supported() {
+    let temp = tempfile::tempdir().unwrap();
+    let workflow = temp.path().join(".github/workflows/ci.yml");
+    fs::create_dir_all(workflow.parent().unwrap()).unwrap();
+    fs::write(
+        &workflow,
+        r#"
+jobs:
+  test:
+    steps:
+      - uses: ./.github/actions/local
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(binary())
+        .arg("--pin-style")
+        .arg("major")
+        .arg("--no-cache")
+        .arg("--no-schema-validation")
+        .arg(temp.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+#[test]
+fn human_color_options_are_honored() {
+    let temp = tempfile::tempdir().unwrap();
+    let workflow = temp.path().join(".github/workflows/ci.yml");
+    fs::create_dir_all(workflow.parent().unwrap()).unwrap();
+    fs::write(
+        &workflow,
+        r#"
+jobs:
+  test:
+    steps:
+      - uses: ./.github/actions/local
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(binary())
+        .arg("--color")
+        .arg("never")
+        .arg("--no-cache")
+        .arg("--no-schema-validation")
+        .arg(temp.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(!stdout.contains("\x1b["));
+
+    let output = Command::new(binary())
+        .arg("--color")
+        .arg("always")
+        .arg("--no-cache")
+        .arg("--no-schema-validation")
+        .arg(temp.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("\x1b["));
 }

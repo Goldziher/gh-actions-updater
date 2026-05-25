@@ -1,4 +1,4 @@
-use crate::cli::{Cli, ColorChoice, MissingRefPolicy, OutputFormat, UpdateMode};
+use crate::cli::{Cli, ColorChoice, MissingRefPolicy, OutputFormat, PinStyle, UpdateMode};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::env;
@@ -26,6 +26,7 @@ pub struct Settings {
     pub refresh_cache: bool,
     pub update: bool,
     pub latest_hash: bool,
+    pub pin_style: PinStyle,
     pub update_exclude: Vec<String>,
     pub missing_ref: MissingRefPolicy,
     pub include_prereleases: bool,
@@ -86,6 +87,7 @@ struct UpdateConfig {
     exclude: Option<Vec<String>>,
     include_prereleases: Option<bool>,
     preserve_major: Option<bool>,
+    pin_style: Option<PinStyle>,
     missing_ref: Option<MissingRefPolicy>,
 }
 
@@ -163,6 +165,14 @@ impl Settings {
         } else {
             file_config.update.mode.unwrap_or(UpdateMode::LatestTag)
         };
+        let latest_hash = matches!(update_mode, UpdateMode::LatestHash);
+        let pin_style = cli
+            .pin_style
+            .or(file_config.update.pin_style)
+            .unwrap_or(PinStyle::Preserve);
+        if latest_hash && pin_style != PinStyle::Preserve {
+            anyhow::bail!("--latest-hash cannot be combined with --pin-style {pin_style:?}");
+        }
 
         let github_token = cli
             .github_token
@@ -209,7 +219,8 @@ impl Settings {
             cache_enabled,
             refresh_cache: cli.refresh_cache,
             update: cli.update,
-            latest_hash: matches!(update_mode, UpdateMode::LatestHash),
+            latest_hash,
+            pin_style,
             update_exclude: file_config.update.exclude.unwrap_or_default(),
             missing_ref: cli
                 .missing_ref
@@ -294,7 +305,7 @@ pub fn parse_ttl(value: &str) -> Result<CacheTtl> {
 #[cfg(test)]
 mod tests {
     use super::{CacheTtl, Settings, parse_ttl};
-    use crate::cli::{Cli, ColorChoice, MissingRefPolicy, OutputFormat};
+    use crate::cli::{Cli, ColorChoice, MissingRefPolicy, OutputFormat, PinStyle};
     use clap::Parser;
 
     #[test]
@@ -339,6 +350,7 @@ mod tests {
         assert_eq!(settings.cache_ttl, CacheTtl::Seconds(0));
         assert!(!settings.cache_enabled);
         assert_eq!(settings.missing_ref, MissingRefPolicy::Error);
+        assert_eq!(settings.pin_style, PinStyle::Preserve);
         assert_eq!(settings.format, OutputFormat::Json);
         assert_eq!(settings.color, ColorChoice::Never);
     }
@@ -369,6 +381,43 @@ color = "always"
         let settings = Settings::resolve(&cli).unwrap();
         assert_eq!(settings.format, OutputFormat::Human);
         assert_eq!(settings.color, ColorChoice::Never);
+    }
+
+    #[test]
+    fn cli_pin_style_overrides_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = temp.path().join(".gh-actions-updater.toml");
+        std::fs::write(
+            &config,
+            r#"
+[update]
+pin_style = "major"
+"#,
+        )
+        .unwrap();
+
+        let cli = Cli::parse_from([
+            "gau",
+            "--config",
+            config.to_str().unwrap(),
+            "--pin-style",
+            "full",
+        ]);
+        let settings = Settings::resolve(&cli).unwrap();
+        assert_eq!(settings.pin_style, PinStyle::Full);
+    }
+
+    #[test]
+    fn latest_hash_rejects_pin_style_conversion() {
+        let cli = Cli::parse_from(["gau", "--latest-hash", "--pin-style", "full"]);
+
+        let error = Settings::resolve(&cli).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("--latest-hash cannot be combined")
+        );
     }
 
     #[test]

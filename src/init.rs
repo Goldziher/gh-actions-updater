@@ -20,6 +20,7 @@ ttl = "6h"
 
 [update]
 mode = "latest-tag"
+pin_style = "preserve"
 exclude = []
 include_prereleases = false
 preserve_major = true

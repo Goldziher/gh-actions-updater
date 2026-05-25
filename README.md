@@ -1,6 +1,6 @@
 # gh-actions-updater
 
-Version: `0.1.3`
+Version: `0.1.4`
 
 `gh-actions-updater` is the package. `gau` is the CLI command.
 
@@ -78,6 +78,7 @@ Use `-r, --recursive` to scan nested repositories or workspaces.
 | `--no-cache` | Disable cache reads and writes. |
 | `--update` | Rewrite supported refs. |
 | `--latest-hash` | Pin update targets to commit SHAs instead of tags. |
+| `--pin-style <preserve\|major\|minor\|full>` | Control semver tag pin formatting. |
 | `--missing-ref <warn\|error\|ignore\|fallback>` | Policy for deleted or missing current refs. |
 | `--check` | Exit nonzero when updates are available. Does not rewrite files. |
 | `--dry-run` | Preview without writing. Implied unless `--update` is passed. |
@@ -125,6 +126,7 @@ ttl = "6h"
 
 [update]
 mode = "latest-tag"
+pin_style = "preserve"
 exclude = []
 include_prereleases = false
 preserve_major = true
@@ -161,8 +163,11 @@ Supported `uses:` locations:
 - composite action step actions: `runs.steps[*].uses` when
   `runs.using = "composite"`
 
-Default mode is `latest-tag`. Semver-like refs such as `@v4` and `@v4.1.0`
-update within the current major version by default. Reusable workflows such as
+Default mode is `latest-tag`. Semver-like refs update within the current major
+version by default. `pin_style = "preserve"` keeps the current precision:
+`@v4` stays a major floating pin, `@v4.1` stays a minor floating pin, and
+`@v4.1.0` updates to full compatible tags. Use `--pin-style major`, `minor`, or
+`full` to intentionally convert between styles. Reusable workflows such as
 `owner/repo/.github/workflows/reusable.yml@v1` follow the same tag/hash policy.
 
 Branch refs such as `@main`, Docker image refs, local actions, local reusable
@@ -188,7 +193,8 @@ Inline ignores are also supported on the same line as a `uses:` value:
 
 `--latest-hash` first selects the same compatible tag that latest-tag mode would
 select, then rewrites to the commit SHA behind that selected tag. It does not
-jump to the action repository default branch.
+jump to the action repository default branch. `--latest-hash` cannot be combined
+with non-preserve pin styles.
 
 Deleted or missing refs are controlled by `missing_ref`:
 
@@ -246,7 +252,7 @@ JSON output includes:
 
 ```json
 {
-  "version": "0.1.3",
+  "version": "0.1.4",
   "changed": false,
   "would_change": false,
   "summary": {
@@ -277,7 +283,7 @@ or a dry-run/diff would modify files.
 ```yaml
 repos:
   - repo: https://github.com/Goldziher/gh-actions-updater
-    rev: v0.1.3
+    rev: v0.1.4
     hooks:
       - id: gh-actions-updater
 ```

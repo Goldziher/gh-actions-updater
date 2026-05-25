@@ -53,12 +53,13 @@ fn discover_root(
     }
 
     let match_base = match_base(root);
-    let walker = WalkBuilder::new(root)
+    let mut builder = WalkBuilder::new(root);
+    builder
         .hidden(false)
-        .git_ignore(true)
+        .git_ignore(!recursive)
         .git_global(true)
-        .git_exclude(true)
-        .build();
+        .git_exclude(true);
+    let walker = builder.build();
 
     for entry in walker {
         let entry = entry.with_context(|| format!("failed to walk {}", root.display()))?;
@@ -98,7 +99,9 @@ fn push_if_match(
     let normalized = normalize(path);
     if is_candidate_file(path)
         && (include.is_match(&root_relative)
-            || (recursive && matches_glob_or_suffix(include, &normalized)))
+            || (recursive
+                && (matches_glob_or_suffix(include, &root_relative)
+                    || matches_glob_or_suffix(include, &normalized))))
         && !exclude.is_match(&root_relative)
         && !matches_glob_or_suffix(exclude, &normalized)
     {
@@ -166,7 +169,7 @@ fn matches_glob_or_suffix(globset: &GlobSet, normalized: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::discover_files;
-    use crate::cli::{ColorChoice, MissingRefPolicy, OutputFormat};
+    use crate::cli::{ColorChoice, MissingRefPolicy, OutputFormat, PinStyle};
     use crate::config::{CacheTtl, DEFAULT_INCLUDES, Settings};
     use std::fs;
     use std::path::Path;
@@ -185,6 +188,7 @@ mod tests {
             refresh_cache: false,
             update: false,
             latest_hash: false,
+            pin_style: PinStyle::Preserve,
             update_exclude: Vec::new(),
             missing_ref: MissingRefPolicy::Warn,
             include_prereleases: false,
@@ -266,6 +270,26 @@ mod tests {
 
         let files = discover_files(&settings).unwrap();
         assert_eq!(files, vec![a]);
+    }
+
+    #[test]
+    fn recursive_directory_scan_includes_nested_repo_actions_surface() {
+        let temp = tempfile::tempdir().unwrap();
+        let workflow = temp.path().join("nested-repo/.github/workflows/ci.yml");
+        let action = temp
+            .path()
+            .join("nested-repo/.github/actions/build/action.yml");
+        fs::create_dir_all(workflow.parent().unwrap()).unwrap();
+        fs::create_dir_all(action.parent().unwrap()).unwrap();
+        fs::write(&workflow, "name: ci").unwrap();
+        fs::write(&action, "name: build").unwrap();
+        fs::write(temp.path().join(".gitignore"), "/nested-repo/\n").unwrap();
+        let mut settings = settings(temp.path());
+        settings.recursive = true;
+
+        let files = discover_files(&settings).unwrap();
+
+        assert_eq!(files, vec![action, workflow]);
     }
 
     #[test]

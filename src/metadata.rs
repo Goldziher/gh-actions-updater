@@ -1,6 +1,6 @@
 use crate::action_ref::{RefKind, ReferenceKind};
 use crate::cache::{CacheKeyParts, CacheLookup, CacheReport, CacheState, cache_key};
-use crate::cli::MissingRefPolicy;
+use crate::cli::{MissingRefPolicy, PinStyle};
 use crate::config::Settings;
 use crate::report::UpdateReport;
 use crate::scanner::{Diagnostic, DiagnosticCategory, ReferenceReport};
@@ -807,7 +807,7 @@ fn select_tag_update_target(
     current: &str,
     tags: &[RemoteTag],
 ) -> Result<TargetDecision> {
-    let Some(current_version) = parse_version_tag(current) else {
+    let Some(current_ref) = parse_version_ref(current) else {
         return Ok(TargetDecision {
             target: None,
             current_missing: false,
@@ -815,6 +815,17 @@ fn select_tag_update_target(
         });
     };
     let current_exists = tags.iter().any(|tag| tag.name == current);
+    if current_exists
+        && settings.pin_style == PinStyle::Preserve
+        && current_ref.precision != VersionPrecision::Full
+    {
+        return Ok(TargetDecision {
+            target: tags.iter().find(|tag| tag.name == current).cloned(),
+            current_missing: false,
+            diagnostic: None,
+        });
+    }
+    let mut diagnostic = None;
     if !current_exists {
         let branch_exists = load_branch_exists(
             settings,
@@ -824,30 +835,85 @@ fn select_tag_update_target(
             reference.parsed.repo.as_deref().unwrap_or_default(),
             current,
         )?;
+        diagnostic = branch_exists.warning;
         if branch_exists.value {
             return Ok(TargetDecision {
                 target: None,
                 current_missing: false,
-                diagnostic: branch_exists.warning,
-            });
-        }
-
-        if settings.missing_ref != MissingRefPolicy::Fallback {
-            return Ok(TargetDecision {
-                target: None,
-                current_missing: true,
-                diagnostic: branch_exists.warning,
+                diagnostic,
             });
         }
     }
 
-    let target = exact_major_version_tag(tags, current)
-        .or_else(|| latest_semver_tag(settings, tags, Some(current_version.major)));
+    let latest = latest_semver_tag(settings, tags, Some(current_ref.version.major));
+    let target = latest
+        .as_ref()
+        .map(|tag| format_pin_style(settings.pin_style, current, &current_ref, tag));
+    let floating_ref_is_resolved = current_ref.precision != VersionPrecision::Full
+        && target.as_deref().is_some_and(|target| target != current)
+        || target.as_deref() == Some(current);
+
+    if settings.latest_hash
+        && !current_exists
+        && current_ref.precision != VersionPrecision::Full
+        && target.as_deref() == Some(current)
+    {
+        return Ok(TargetDecision {
+            target: None,
+            current_missing: false,
+            diagnostic,
+        });
+    }
+
+    if !current_exists
+        && !floating_ref_is_resolved
+        && settings.missing_ref != MissingRefPolicy::Fallback
+    {
+        return Ok(TargetDecision {
+            target: None,
+            current_missing: true,
+            diagnostic,
+        });
+    }
+
+    if let (Some(target), Some(latest)) = (&target, &latest)
+        && target != current
+        && target != &latest.name
+        && !tags.iter().any(|tag| tag.name == *target)
+    {
+        let branch_exists = load_branch_exists(
+            settings,
+            cache,
+            provider,
+            reference.parsed.owner.as_deref().unwrap_or_default(),
+            reference.parsed.repo.as_deref().unwrap_or_default(),
+            target,
+        )?;
+        if let Some(warning) = branch_exists.warning {
+            diagnostic = Some(warning);
+        }
+        if !branch_exists.value {
+            return Ok(TargetDecision {
+                target: None,
+                current_missing: false,
+                diagnostic: diagnostic.or_else(|| {
+                    Some(format!(
+                        "pin-style target does not exist as a tag or branch: {target}"
+                    ))
+                }),
+            });
+        }
+    }
+
+    let target = target.map(|target| RemoteTag {
+        name: target,
+        sha: latest.map(|tag| tag.sha).unwrap_or_default(),
+    });
 
     Ok(TargetDecision {
         target,
-        current_missing: !current_exists,
-        diagnostic: None,
+        current_missing: !current_exists && !floating_ref_is_resolved,
+        diagnostic,
     })
 }
 
@@ -947,14 +1013,6 @@ fn latest_semver_tag(
         .map(|(tag, _)| tag.clone())
 }
 
-fn exact_major_version_tag(tags: &[RemoteTag], current: &str) -> Option<RemoteTag> {
-    let version = current.strip_prefix('v').unwrap_or(current);
-    if version.is_empty() || !version.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    tags.iter().find(|tag| tag.name == current).cloned()
-}
-
 pub fn exit_code_for_resolution(
     settings: &Settings,
     resolution: &MetadataResolution,
@@ -977,13 +1035,75 @@ pub fn exit_code_for_resolution(
 }
 
 fn parse_version_tag(tag: &str) -> Option<Version> {
+    parse_version_ref(tag).map(|version_ref| version_ref.version)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum VersionPrecision {
+    Major,
+    Minor,
+    Full,
+}
+
+#[derive(Clone, Debug)]
+struct VersionRef {
+    version: Version,
+    precision: VersionPrecision,
+}
+
+fn parse_version_ref(tag: &str) -> Option<VersionRef> {
     let version = tag.strip_prefix('v').unwrap_or(tag);
     let parts: Vec<_> = version.split('.').collect();
-    match parts.as_slice() {
-        [major] => Version::parse(&format!("{major}.0.0")).ok(),
-        [major, minor] => Version::parse(&format!("{major}.{minor}.0")).ok(),
-        [major, minor, patch] => Version::parse(&format!("{major}.{minor}.{patch}")).ok(),
-        _ => Version::parse(version).ok(),
+    let (version, precision) = match parts.as_slice() {
+        [major] => (
+            Version::parse(&format!("{major}.0.0")).ok()?,
+            VersionPrecision::Major,
+        ),
+        [major, minor] => (
+            Version::parse(&format!("{major}.{minor}.0")).ok()?,
+            VersionPrecision::Minor,
+        ),
+        [major, minor, patch] => (
+            Version::parse(&format!("{major}.{minor}.{patch}")).ok()?,
+            VersionPrecision::Full,
+        ),
+        _ => (Version::parse(version).ok()?, VersionPrecision::Full),
+    };
+    Some(VersionRef { version, precision })
+}
+
+fn format_pin_style(
+    pin_style: PinStyle,
+    current: &str,
+    current_ref: &VersionRef,
+    target: &RemoteTag,
+) -> String {
+    match pin_style {
+        PinStyle::Preserve => format_version_ref(current_ref.precision, current, target),
+        PinStyle::Major => format_version_ref(VersionPrecision::Major, current, target),
+        PinStyle::Minor => format_version_ref(VersionPrecision::Minor, current, target),
+        PinStyle::Full => target.name.clone(),
+    }
+}
+
+fn format_version_ref(precision: VersionPrecision, current: &str, target: &RemoteTag) -> String {
+    let Some(target_ref) = parse_version_ref(&target.name) else {
+        return target.name.clone();
+    };
+    let prefix = if current.starts_with('v') || target.name.starts_with('v') {
+        "v"
+    } else {
+        ""
+    };
+    match precision {
+        VersionPrecision::Major => format!("{prefix}{}", target_ref.version.major),
+        VersionPrecision::Minor => {
+            format!(
+                "{prefix}{}.{}",
+                target_ref.version.major, target_ref.version.minor
+            )
+        }
+        VersionPrecision::Full => target.name.clone(),
     }
 }
 
@@ -1046,7 +1166,7 @@ mod tests {
         exit_code_for_resolution, parse_ls_remote_tags, resolve_updates_with_provider,
     };
     use crate::cache::{CacheKeyParts, CacheState, cache_key};
-    use crate::cli::{ColorChoice, MissingRefPolicy, OutputFormat};
+    use crate::cli::{ColorChoice, MissingRefPolicy, OutputFormat, PinStyle};
     use crate::config::{CacheTtl, Settings};
     use crate::scanner::ReferenceReport;
     use anyhow::Result;
@@ -1165,6 +1285,7 @@ mod tests {
             refresh_cache: false,
             update: false,
             latest_hash: false,
+            pin_style: PinStyle::Preserve,
             update_exclude: Vec::new(),
             missing_ref: MissingRefPolicy::Warn,
             include_prereleases: false,
@@ -1226,6 +1347,142 @@ mod tests {
 
         assert!(resolution.updates.is_empty());
         assert_eq!(provider.calls.get(), 1);
+    }
+
+    #[test]
+    fn preserve_keeps_missing_major_float_when_same_major_tags_exist() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = settings(temp.path());
+        let provider = FakeProvider {
+            tags: vec![tag("v1.0.1"), tag("v1.0.2")],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("actions/setup-example@v1")],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(resolution.updates.is_empty());
+        assert!(resolution.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn preserve_keeps_minor_float_when_patch_tag_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = settings(temp.path());
+        let provider = FakeProvider {
+            tags: vec![tag("v1.24"), tag("v1.24.0")],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("erlef/setup-beam@v1.24")],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(resolution.updates.is_empty());
+        assert!(resolution.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn full_pin_style_converts_floats_to_latest_full_tag() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.pin_style = PinStyle::Full;
+        let provider = FakeProvider {
+            tags: vec![tag("v1.24.0"), tag("v1.25.0")],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("erlef/setup-beam@v1.24")],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(resolution.updates.len(), 1);
+        assert_eq!(resolution.updates[0].target.as_deref(), Some("v1.25.0"));
+    }
+
+    #[test]
+    fn major_pin_style_converts_full_refs_to_major_float() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.pin_style = PinStyle::Major;
+        let provider = FakeProvider {
+            tags: vec![tag("v4"), tag("v4.1.0"), tag("v4.2.0")],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("actions/cache@v4.1.0")],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(resolution.updates.len(), 1);
+        assert_eq!(resolution.updates[0].target.as_deref(), Some("v4"));
+    }
+
+    #[test]
+    fn minor_pin_style_converts_full_refs_to_minor_float() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.pin_style = PinStyle::Minor;
+        let provider = FakeProvider {
+            tags: vec![tag("v4.1.0"), tag("v4.2"), tag("v4.2.0")],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("actions/cache@v4.1.0")],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(resolution.updates.len(), 1);
+        assert_eq!(resolution.updates[0].target.as_deref(), Some("v4.2"));
+    }
+
+    #[test]
+    fn pin_style_does_not_rewrite_to_missing_float_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.pin_style = PinStyle::Major;
+        let provider = BranchCheckingProvider {
+            tags: vec![tag("v4.1.0"), tag("v4.2.0")],
+            branch_exists: false,
+            tag_calls: Cell::new(0),
+            branch_calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("actions/cache@v4.1.0")],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(resolution.updates.is_empty());
+        assert!(
+            resolution.diagnostics[0]
+                .message
+                .contains("pin-style target does not exist")
+        );
     }
 
     #[test]
@@ -1535,7 +1792,7 @@ mod tests {
     }
 
     #[test]
-    fn reports_missing_current_ref() {
+    fn reports_missing_full_current_ref() {
         let temp = tempfile::tempdir().unwrap();
         let settings = settings(temp.path());
         let provider = FakeProvider {
@@ -1546,7 +1803,7 @@ mod tests {
         let resolution: MetadataResolution = resolve_updates_with_provider(
             &settings,
             CacheState::prepare(&settings).unwrap(),
-            &[reference("actions/checkout@v4")],
+            &[reference("actions/checkout@v4.0.0")],
             &provider,
         )
         .unwrap();
@@ -1557,6 +1814,30 @@ mod tests {
 
     #[test]
     fn branch_backed_semver_ref_is_not_reported_missing() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = settings(temp.path());
+        let provider = BranchCheckingProvider {
+            tags: Vec::new(),
+            branch_exists: true,
+            tag_calls: Cell::new(0),
+            branch_calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("ruby/setup-ruby@v1")],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(resolution.updates.is_empty());
+        assert!(resolution.diagnostics.is_empty());
+        assert_eq!(provider.branch_calls.get(), 1);
+    }
+
+    #[test]
+    fn branch_backed_semver_ref_wins_over_matching_tag_updates() {
         let temp = tempfile::tempdir().unwrap();
         let settings = settings(temp.path());
         let provider = BranchCheckingProvider {
@@ -1580,9 +1861,37 @@ mod tests {
     }
 
     #[test]
+    fn latest_hash_does_not_pin_missing_floating_tag_to_full_tag_sha() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.latest_hash = true;
+        let provider = BranchCheckingProvider {
+            tags: vec![tag_with_sha(
+                "v1.2.0",
+                "2222222222222222222222222222222222222222",
+            )],
+            branch_exists: false,
+            tag_calls: Cell::new(0),
+            branch_calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("actions/example@v1")],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(resolution.updates.is_empty());
+        assert!(resolution.diagnostics.is_empty());
+    }
+
+    #[test]
     fn missing_ref_fallback_counts_update() {
         let temp = tempfile::tempdir().unwrap();
         let mut settings = settings(temp.path());
+        settings.pin_style = PinStyle::Full;
         settings.missing_ref = MissingRefPolicy::Fallback;
         let provider = FakeProvider {
             tags: vec![tag("v4.1.0")],
@@ -1616,7 +1925,7 @@ mod tests {
         let resolution = resolve_updates_with_provider(
             &settings,
             CacheState::prepare(&settings).unwrap(),
-            &[reference("actions/checkout@v4")],
+            &[reference("actions/checkout@v4.0.0")],
             &provider,
         )
         .unwrap();

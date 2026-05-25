@@ -1,11 +1,11 @@
 use crate::cache::CacheReport;
-use crate::cli::OutputFormat;
+use crate::cli::{ColorChoice, OutputFormat};
 use crate::config::Settings;
 use crate::metadata::MetadataResolution;
 use crate::scanner::{Diagnostic, FileReport, ReferenceReport, ScanOutput};
 use anyhow::Result;
 use serde::Serialize;
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 
 #[derive(Debug, Serialize)]
@@ -27,6 +27,10 @@ pub struct RunReport {
     quiet: bool,
     #[serde(skip)]
     verbose: bool,
+    #[serde(skip)]
+    color: bool,
+    #[serde(skip)]
+    diagnostic_color: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -62,16 +66,26 @@ impl RunReport {
         let references_found = scan.references.len();
         let _ = (
             settings.dry_run,
-            settings.color,
             settings.github_token_present,
             settings.schema_validation,
             settings.missing_ref,
             settings.refresh_cache,
             settings.include_prereleases,
             settings.preserve_major,
+            settings.pin_style,
             settings.recursive,
             settings.threads,
         );
+        let color = match settings.color {
+            ColorChoice::Always => true,
+            ColorChoice::Never => false,
+            ColorChoice::Auto => std::io::stdout().is_terminal(),
+        };
+        let diagnostic_color = match settings.color {
+            ColorChoice::Always => true,
+            ColorChoice::Never => false,
+            ColorChoice::Auto => std::io::stderr().is_terminal(),
+        };
         let would_change = !resolution.updates.is_empty();
         Self {
             version: version.to_string(),
@@ -95,6 +109,8 @@ impl RunReport {
             format: settings.format,
             quiet: settings.quiet,
             verbose: settings.verbose,
+            color,
+            diagnostic_color,
         }
     }
 
@@ -113,47 +129,28 @@ impl RunReport {
             }
             OutputFormat::Human => {
                 if !self.quiet {
-                    writeln!(
-                        stdout,
-                        "Scanned {} file(s), found {} reference(s), {} update(s) available.",
-                        self.summary.files_scanned,
-                        self.summary.references_found,
-                        self.summary.updates_available
-                    )?;
-
-                    for reference in &self.references {
-                        writeln!(
-                            stdout,
-                            "{}:{}:{} {} ({:?})",
-                            reference.file,
-                            reference.line,
-                            reference.column,
-                            reference.raw,
-                            reference.parsed.kind
-                        )?;
-                    }
-
-                    for update in &self.updates {
-                        let target = update.target.as_deref().unwrap_or("<unknown>");
-                        writeln!(
-                            stdout,
-                            "update {}:{} {} -> {}",
-                            update.file, update.line, update.current, target
-                        )?;
-                    }
-
-                    for diff in &self.diffs {
-                        writeln!(stdout, "{diff}")?;
-                    }
+                    self.write_human(stdout)?;
                 }
             }
         }
 
         for diagnostic in &self.diagnostics {
             if let Some(line) = diagnostic.line {
-                writeln!(stderr, "{}:{line}: {}", diagnostic.file, diagnostic.message)?;
+                writeln!(
+                    stderr,
+                    "{} {}:{line}: {}",
+                    self.style_with("diagnostic", Color::Yellow, self.diagnostic_color),
+                    diagnostic.file,
+                    diagnostic.message
+                )?;
             } else {
-                writeln!(stderr, "{}: {}", diagnostic.file, diagnostic.message)?;
+                writeln!(
+                    stderr,
+                    "{} {}: {}",
+                    self.style_with("diagnostic", Color::Yellow, self.diagnostic_color),
+                    diagnostic.file,
+                    diagnostic.message
+                )?;
             }
         }
 
@@ -171,4 +168,125 @@ impl RunReport {
 
         Ok(())
     }
+
+    fn write_human(&self, stdout: &mut impl Write) -> Result<()> {
+        let status = if self.summary.updates_available == 0 && self.diagnostics.is_empty() {
+            self.style("ok", Color::Green)
+        } else if self.summary.updates_available > 0 {
+            self.style("updates", Color::Yellow)
+        } else {
+            self.style("diagnostics", Color::Yellow)
+        };
+        writeln!(
+            stdout,
+            "{} {}",
+            self.style("gh-actions-updater", Color::Cyan),
+            status
+        )?;
+        writeln!(
+            stdout,
+            "  scanned {} file(s), found {} reference(s), {} update(s)",
+            self.summary.files_scanned,
+            self.summary.references_found,
+            self.summary.updates_available
+        )?;
+
+        if !self.files.is_empty() {
+            writeln!(stdout)?;
+            writeln!(stdout, "{}", self.style("Files", Color::Bold))?;
+            for file in &self.files {
+                writeln!(
+                    stdout,
+                    "  {} {} ({:?}, {} ref{})",
+                    self.style("scan", Color::Blue),
+                    file.path,
+                    file.kind,
+                    file.references,
+                    plural(file.references)
+                )?;
+            }
+        }
+
+        if !self.references.is_empty() {
+            writeln!(stdout)?;
+            writeln!(stdout, "{}", self.style("References", Color::Bold))?;
+            for reference in &self.references {
+                writeln!(
+                    stdout,
+                    "  {} {}:{}:{} {} ({:?})",
+                    self.style("ref", Color::Blue),
+                    reference.file,
+                    reference.line,
+                    reference.column,
+                    reference.raw,
+                    reference.parsed.kind
+                )?;
+            }
+        }
+
+        if !self.updates.is_empty() {
+            writeln!(stdout)?;
+            writeln!(stdout, "{}", self.style("Updates", Color::Bold))?;
+            for update in &self.updates {
+                let target = update.target.as_deref().unwrap_or("<unknown>");
+                writeln!(
+                    stdout,
+                    "  {} {}:{} {} -> {}",
+                    self.style("update", Color::Yellow),
+                    update.file,
+                    update.line,
+                    update.current,
+                    target
+                )?;
+            }
+        } else {
+            writeln!(stdout)?;
+            writeln!(
+                stdout,
+                "{}",
+                self.style("No updates available.", Color::Green)
+            )?;
+        }
+
+        if !self.diffs.is_empty() {
+            writeln!(stdout)?;
+            writeln!(stdout, "{}", self.style("Diffs", Color::Bold))?;
+            for diff in &self.diffs {
+                writeln!(stdout, "{diff}")?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn style(&self, value: &str, color: Color) -> String {
+        self.style_with(value, color, self.color)
+    }
+
+    fn style_with(&self, value: &str, color: Color, enabled: bool) -> String {
+        if !enabled {
+            return value.to_string();
+        }
+        let code = match color {
+            Color::Bold => "1",
+            Color::Blue => "34",
+            Color::Cyan => "36",
+            Color::Green => "32",
+            Color::Yellow => "33",
+        };
+        format!("\x1b[{code}m{value}\x1b[0m")
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Color {
+    Bold,
+    Blue,
+    Cyan,
+    Green,
+    Yellow,
+}
+
+fn plural(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
 }
