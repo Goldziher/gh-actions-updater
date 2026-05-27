@@ -1,13 +1,9 @@
 # gh-actions-updater
 
-Version: `0.1.5`
+This tool comes out of necessity - its a pain to maintain Github action versions, and depending on "dependabot" for this creates a lot of unnecessary noise. I tried a similar tool written in typescript and was underwhelmed by the results - it was slow, and did not implement some of the behaviors I needed. Thus `gh-actions-updater` or as the CLI command goes `gau`.
 
-`gh-actions-updater` is the package. `gau` is the CLI command.
-
-`gau` scans GitHub Actions workflow files and action metadata, reports available
-updates, and can rewrite supported `uses:` refs to the latest compatible tag or
-to the commit SHA behind that tag. It is built for fast local, CI, and
-pre-commit use with a global metadata cache.
+`gau` scans GitHub Actions workflow files and action metadata, reports available updates, and can rewrite supported `uses:` refs to the latest compatible tag or
+to the commit SHA behind that tag. It is built for fast local, CI, and pre-commit use with a global metadata cache. Its extremely fast, idempotent and published across multiple packaging ecosystems (using go-releaser) which makes it easy to use regardless of your stack. 
 
 ## Install
 
