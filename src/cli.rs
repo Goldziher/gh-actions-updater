@@ -104,6 +104,18 @@ pub struct Cli {
 
     #[arg(long, help = "Skip schema validation")]
     pub no_schema_validation: bool,
+
+    #[arg(
+        long,
+        help = "Verify every reference exists upstream (tags, branches, SHAs) or on disk (local refs)"
+    )]
+    pub validate: bool,
+
+    #[arg(
+        long = "pin-floating-to-sha",
+        help = "Rewrite branch and non-semver-tag references to the commit SHA they currently point at"
+    )]
+    pub pin_floating_to_sha: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]

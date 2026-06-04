@@ -43,6 +43,8 @@ pub struct Settings {
     pub github_api_url: String,
     pub strict_schema: bool,
     pub schema_validation: bool,
+    pub validate: bool,
+    pub pin_floating_to_sha: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -244,6 +246,8 @@ impl Settings {
                 .unwrap_or_else(|| "https://api.github.com".to_string()),
             strict_schema: cli.strict_schema,
             schema_validation: !cli.no_schema_validation,
+            validate: cli.validate,
+            pin_floating_to_sha: cli.pin_floating_to_sha,
         })
     }
 }

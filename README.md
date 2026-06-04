@@ -250,7 +250,7 @@ JSON output includes:
 
 ```json
 {
-  "version": "0.1.5",
+  "version": "0.1.6",
   "changed": false,
   "would_change": false,
   "summary": {
@@ -281,7 +281,7 @@ or a dry-run/diff would modify files.
 ```yaml
 repos:
   - repo: https://github.com/Goldziher/gh-actions-updater
-    rev: v0.1.5
+    rev: v0.1.6
     hooks:
       - id: gh-actions-updater
 ```

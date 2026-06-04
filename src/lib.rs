@@ -56,7 +56,7 @@ pub fn run() -> Result<()> {
             std::process::exit(3);
         }
     };
-    let scan = match scanner::scan_files(&files, &settings).context("failed to scan files") {
+    let mut scan = match scanner::scan_files(&files, &settings).context("failed to scan files") {
         Ok(scan) => scan,
         Err(error) => {
             eprintln!("{error:#}");
@@ -72,6 +72,7 @@ pub fn run() -> Result<()> {
                 updates: Vec::new(),
                 diagnostics: Vec::new(),
                 cache: cache.report.clone(),
+                resolved_ref_kinds: Vec::new(),
             },
             files,
             scan,
@@ -88,6 +89,11 @@ pub fn run() -> Result<()> {
             std::process::exit(4);
         }
     };
+    for (idx, kind) in &resolution.resolved_ref_kinds {
+        if let Some(reference) = scan.references.get_mut(*idx) {
+            reference.parsed.ref_kind = kind.clone();
+        }
+    }
     let exit_code = metadata::exit_code_for_resolution(&settings, &resolution);
     let rewrite_result = if settings.update || settings.diff {
         match rewrite::apply_updates(&settings, &resolution.updates)

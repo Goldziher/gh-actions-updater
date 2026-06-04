@@ -2,6 +2,31 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.6] - 2026-06-04
+
+### Added
+
+- `--validate` verifies that every reference exists in its upstream repository
+  (tags, branches, and commit SHAs) or on disk for local refs. Missing
+  references are surfaced through the existing `missing_ref` policy.
+- `--pin-floating-to-sha` rewrites references pinned to a branch or a
+  non-semver tag (for example `main`, `release/v1`, `stable`) to the commit
+  SHA they currently point at — a security-hardening fix that converts
+  mutable refs into immutable ones.
+- New `branch` and `non_semver_tag` `ref_kind` values, populated when
+  `--validate` or `--pin-floating-to-sha` classifies an otherwise opaque ref
+  against the upstream repository.
+- SHA-pinned references now emit an advisory diagnostic in the default scan
+  when a newer same-major SHA exists, so users see stale pins without having
+  to opt into `--latest-hash`.
+
+### Fixed
+
+- `--pin-style preserve` no longer demotes full semver pins to equivalent
+  lower-precision tags. For repositories such as `erlef/setup-beam` that
+  publish both `v1.24` and `v1.24.0`, a pin at `v1.24.0` is now treated as a
+  no-op instead of being "updated" to `v1.24`.
+
 ## [0.1.5] - 2026-05-25
 
 ### Fixed

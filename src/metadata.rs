@@ -16,6 +16,11 @@ pub struct MetadataResolution {
     pub updates: Vec<UpdateReport>,
     pub diagnostics: Vec<Diagnostic>,
     pub cache: CacheReport,
+    /// `(reference_index, resolved_kind)` pairs for refs whose `ref_kind`
+    /// changed from `BranchOrUnknown` to `Branch` or `NonSemverTag` after
+    /// upstream resolution. Callers apply these back to scanner output before
+    /// reporting.
+    pub resolved_ref_kinds: Vec<(usize, RefKind)>,
 }
 
 #[derive(Debug, Clone, Deserialize, Eq, PartialEq, Serialize)]
@@ -69,7 +74,11 @@ pub enum CommitFetch {
 
 #[derive(Debug, Clone)]
 pub enum BranchFetch {
-    Fresh { exists: bool, etag: Option<String> },
+    Fresh {
+        exists: bool,
+        sha: Option<String>,
+        etag: Option<String>,
+    },
     NotModified,
 }
 
@@ -100,6 +109,8 @@ struct BranchCacheValue {
     etag: Option<String>,
     branch: String,
     exists: bool,
+    #[serde(default)]
+    sha: Option<String>,
 }
 
 pub struct GitHubRestProvider {
@@ -232,17 +243,31 @@ impl TagProvider for GitHubRestProvider {
 
         match request.call() {
             Ok(response) if response.status() == 304 => Ok(BranchFetch::NotModified),
-            Ok(response) => Ok(BranchFetch::Fresh {
-                exists: true,
-                etag: response
+            Ok(mut response) => {
+                let etag = response
                     .headers()
                     .get("etag")
                     .and_then(|value| value.to_str().ok())
-                    .map(str::to_string),
-            }),
+                    .map(str::to_string);
+                let body: serde_json::Value =
+                    response.body_mut().read_json().with_context(|| {
+                        format!("failed to parse branch metadata for {owner}/{repo}@{branch}")
+                    })?;
+                let sha = body
+                    .get("commit")
+                    .and_then(|commit| commit.get("sha"))
+                    .and_then(|sha| sha.as_str())
+                    .map(str::to_string);
+                Ok(BranchFetch::Fresh {
+                    exists: true,
+                    sha,
+                    etag,
+                })
+            }
             Err(ureq::Error::StatusCode(304)) => Ok(BranchFetch::NotModified),
             Err(ureq::Error::StatusCode(404)) => Ok(BranchFetch::Fresh {
                 exists: false,
+                sha: None,
                 etag: None,
             }),
             Err(error) => {
@@ -349,8 +374,15 @@ impl TagProvider for GitLsRemoteProvider {
             ));
         }
 
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let sha = stdout
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().next())
+            .map(str::to_string);
         Ok(BranchFetch::Fresh {
-            exists: !output.stdout.is_empty(),
+            exists: sha.is_some(),
+            sha,
             etag: None,
         })
     }
@@ -377,14 +409,18 @@ pub fn resolve_updates_with_provider(
 ) -> Result<MetadataResolution> {
     let mut diagnostics = Vec::new();
     let mut updates = Vec::new();
+    let mut resolved_ref_kinds: Vec<(usize, RefKind)> = Vec::new();
     let mut tags_by_repo: AHashMap<(String, String), TagLoad> = AHashMap::new();
     let update_exclude = build_update_exclude_globset(&settings.update_exclude)?;
 
-    for reference in references {
+    for (idx, reference) in references.iter().enumerate() {
         if !matches!(
             reference.parsed.kind,
             ReferenceKind::RemoteAction | ReferenceKind::ReusableWorkflow
         ) {
+            if settings.validate {
+                validate_local_reference(reference, &mut diagnostics);
+            }
             continue;
         }
 
@@ -396,43 +432,208 @@ pub fn resolve_updates_with_provider(
             continue;
         };
 
-        if reference.update_ignored
-            || is_update_excluded(&update_exclude, reference.raw.as_str(), owner, repo)
+        let excluded = reference.update_ignored
+            || is_update_excluded(&update_exclude, reference.raw.as_str(), owner, repo);
+
+        // Compute the update path this reference would take if not excluded.
+        // SHA refs always trigger metadata: with --latest-hash they're update
+        // candidates, otherwise they get an advisory diagnostic with the
+        // current pin's tag and any newer same-major SHA.
+        let semver_update = matches!(reference.parsed.ref_kind, RefKind::SemverLikeTag);
+        let sha_update = settings.latest_hash && reference.parsed.ref_kind == RefKind::Sha;
+        let sha_advisory = !settings.latest_hash && reference.parsed.ref_kind == RefKind::Sha;
+        let needs_classification = matches!(
+            reference.parsed.ref_kind,
+            RefKind::BranchOrUnknown | RefKind::Branch | RefKind::NonSemverTag
+        ) && (settings.validate || settings.pin_floating_to_sha);
+
+        // Tags are needed for any path that consults the upstream tag list.
+        let needs_tags = (!excluded
+            && (semver_update || sha_update || sha_advisory || needs_classification))
+            || settings.validate;
+
+        let mut effective_ref_kind = reference.parsed.ref_kind.clone();
+        let mut classification_sha: Option<String> = None;
+
+        if needs_tags {
+            let repo_key = (owner.to_string(), repo.to_string());
+            if !tags_by_repo.contains_key(&repo_key) {
+                let tags = load_tags(settings, &mut cache, provider, owner, repo)?;
+                tags_by_repo.insert(repo_key.clone(), tags);
+            }
+            let tag_load = tags_by_repo
+                .get(&repo_key)
+                .expect("repo tags should be inserted before lookup");
+            if let Some(warning) = &tag_load.warning {
+                diagnostics.push(Diagnostic {
+                    file: reference.file.clone(),
+                    line: Some(reference.line),
+                    message: warning.clone(),
+                    category: DiagnosticCategory::General,
+                });
+            }
+            let tags = &tag_load.tags;
+
+            // Classify BranchOrUnknown refs by checking upstream — only when
+            // --validate or --pin-floating-to-sha is on. We avoid extra API
+            // calls in the default scan.
+            if needs_classification {
+                if effective_ref_kind == RefKind::BranchOrUnknown {
+                    if let Some(tag) = tags.iter().find(|tag| tag.name == current) {
+                        effective_ref_kind = RefKind::NonSemverTag;
+                        classification_sha = Some(tag.sha.clone());
+                    } else {
+                        let branch_lookup = load_branch_exists(
+                            settings, &mut cache, provider, owner, repo, current,
+                        )?;
+                        if let Some(warning) = branch_lookup.warning {
+                            diagnostics.push(Diagnostic {
+                                file: reference.file.clone(),
+                                line: Some(reference.line),
+                                message: warning,
+                                category: DiagnosticCategory::General,
+                            });
+                        }
+                        if let Some(sha) = branch_lookup.value {
+                            effective_ref_kind = RefKind::Branch;
+                            classification_sha = Some(sha);
+                        }
+                    }
+                    if effective_ref_kind != RefKind::BranchOrUnknown {
+                        resolved_ref_kinds.push((idx, effective_ref_kind.clone()));
+                    }
+                } else if matches!(effective_ref_kind, RefKind::Branch | RefKind::NonSemverTag) {
+                    if let Some(tag) = tags.iter().find(|tag| tag.name == current) {
+                        classification_sha = Some(tag.sha.clone());
+                    } else {
+                        let branch_lookup = load_branch_exists(
+                            settings, &mut cache, provider, owner, repo, current,
+                        )?;
+                        classification_sha = branch_lookup.value;
+                    }
+                }
+            }
+
+            // --validate: verify the ref exists upstream.
+            if settings.validate {
+                let exists_upstream = match effective_ref_kind {
+                    RefKind::SemverLikeTag | RefKind::NonSemverTag => {
+                        tags.iter().any(|tag| tag.name == current)
+                    }
+                    RefKind::Branch => classification_sha.is_some(),
+                    RefKind::BranchOrUnknown => false,
+                    RefKind::Sha => {
+                        load_commit_exists(settings, &mut cache, provider, owner, repo, current)?
+                    }
+                    RefKind::None => true,
+                };
+                if !exists_upstream {
+                    handle_missing_ref(settings, reference, &mut diagnostics)?;
+                }
+            }
+        }
+
+        if excluded {
+            continue;
+        }
+
+        let update_candidate = if settings.pin_floating_to_sha
+            && matches!(effective_ref_kind, RefKind::Branch | RefKind::NonSemverTag)
         {
-            continue;
-        }
-
-        let update_candidate = if settings.latest_hash {
-            matches!(
-                reference.parsed.ref_kind,
-                RefKind::SemverLikeTag | RefKind::Sha
-            )
+            classification_sha.is_some()
+        } else if settings.latest_hash {
+            matches!(effective_ref_kind, RefKind::SemverLikeTag | RefKind::Sha)
         } else {
-            reference.parsed.updatable
+            matches!(effective_ref_kind, RefKind::SemverLikeTag | RefKind::Sha)
         };
-        if !update_candidate {
+
+        // SHA refs without --latest-hash: emit an advisory diagnostic when a
+        // newer same-major tag exists, but do not create an update.
+        let sha_advisory = !settings.latest_hash
+            && !settings.pin_floating_to_sha
+            && effective_ref_kind == RefKind::Sha;
+
+        let semver_update = !settings.pin_floating_to_sha
+            && !sha_advisory
+            && (matches!(effective_ref_kind, RefKind::SemverLikeTag)
+                || (settings.latest_hash && effective_ref_kind == RefKind::Sha));
+
+        if !update_candidate && !sha_advisory {
             continue;
         }
 
-        let repo_key = (owner.to_string(), repo.to_string());
-        if !tags_by_repo.contains_key(&repo_key) {
-            let tags = load_tags(settings, &mut cache, provider, owner, repo)?;
-            tags_by_repo.insert(repo_key.clone(), tags);
+        let tag_load = tags_by_repo.get(&(owner.to_string(), repo.to_string()));
+        let tags: &[RemoteTag] = tag_load.map(|load| load.tags.as_slice()).unwrap_or(&[]);
+
+        if settings.pin_floating_to_sha
+            && matches!(effective_ref_kind, RefKind::Branch | RefKind::NonSemverTag)
+        {
+            let Some(sha) = classification_sha.clone() else {
+                continue;
+            };
+            if sha != current {
+                updates.push(UpdateReport {
+                    file: reference.file.clone(),
+                    line: reference.line,
+                    current: current.to_string(),
+                    target: Some(sha),
+                    ref_span: reference.ref_span,
+                    rewrite_supported: reference.rewrite_supported,
+                    rewrite_reason: reference.rewrite_reason.clone(),
+                });
+            }
+            continue;
         }
 
-        let tag_load = tags_by_repo
-            .get(&repo_key)
-            .expect("repo tags should be inserted before lookup");
-        if let Some(warning) = &tag_load.warning {
-            diagnostics.push(Diagnostic {
-                file: reference.file.clone(),
-                line: Some(reference.line),
-                message: warning.clone(),
-                category: DiagnosticCategory::General,
-            });
+        if sha_advisory {
+            let decision = select_hash_update_target(
+                &Settings {
+                    latest_hash: true,
+                    ..settings.clone()
+                },
+                &mut cache,
+                provider,
+                reference,
+                current,
+                tags,
+            )?;
+            if let Some(target) = decision.target {
+                if !target.sha.is_empty() && !target.sha.eq_ignore_ascii_case(current) {
+                    let short = if current.len() >= 8 {
+                        &current[..8]
+                    } else {
+                        current
+                    };
+                    diagnostics.push(Diagnostic {
+                        file: reference.file.clone(),
+                        line: Some(reference.line),
+                        message: format!(
+                            "SHA pin {short} tracks tag {tag}; newer SHA {newer_short} available — run with --latest-hash to update",
+                            tag = target.name,
+                            newer_short = if target.sha.len() >= 8 { &target.sha[..8] } else { target.sha.as_str() },
+                        ),
+                        category: DiagnosticCategory::General,
+                    });
+                }
+            }
+            if decision.current_missing {
+                handle_missing_ref(settings, reference, &mut diagnostics)?;
+            }
+            if let Some(message) = decision.diagnostic {
+                diagnostics.push(Diagnostic {
+                    file: reference.file.clone(),
+                    line: Some(reference.line),
+                    message,
+                    category: DiagnosticCategory::General,
+                });
+            }
+            continue;
         }
 
-        let tags = &tag_load.tags;
+        if !semver_update {
+            continue;
+        }
+
         let decision = if settings.latest_hash {
             select_hash_update_target(settings, &mut cache, provider, reference, current, tags)?
         } else {
@@ -484,6 +685,7 @@ pub fn resolve_updates_with_provider(
     Ok(MetadataResolution {
         updates,
         diagnostics,
+        resolved_ref_kinds,
         cache: cache.report,
     })
 }
@@ -673,9 +875,9 @@ fn load_branch_exists(
     owner: &str,
     repo: &str,
     branch: &str,
-) -> Result<LookupLoad<bool>> {
+) -> Result<LookupLoad<Option<String>>> {
     let auth_fingerprint = auth_fingerprint(settings.github_token.as_deref());
-    let lookup_mode = format!("branch:{branch}");
+    let lookup_mode = format!("branch-sha-v2:{branch}");
     let key = cache_key(CacheKeyParts {
         api_host: &settings.github_api_url,
         owner,
@@ -687,13 +889,13 @@ fn load_branch_exists(
     match cache.read_json::<BranchCacheValue>(&key)? {
         CacheLookup::Fresh(value) => {
             return Ok(LookupLoad {
-                value: value.exists,
+                value: value.exists.then_some(value.sha).flatten(),
                 warning: None,
             });
         }
         CacheLookup::Stale(value) => {
             match provider.fetch_branch(owner, repo, branch, value.etag.as_deref()) {
-                Ok(BranchFetch::Fresh { exists, etag }) => {
+                Ok(BranchFetch::Fresh { exists, sha, etag }) => {
                     cache.write_json(
                         &key,
                         &BranchCacheValue {
@@ -703,23 +905,24 @@ fn load_branch_exists(
                             etag,
                             branch: branch.to_string(),
                             exists,
+                            sha: sha.clone(),
                         },
                     )?;
                     return Ok(LookupLoad {
-                        value: exists,
+                        value: if exists { sha } else { None },
                         warning: None,
                     });
                 }
                 Ok(BranchFetch::NotModified) => {
                     cache.write_json(&key, &value)?;
                     return Ok(LookupLoad {
-                        value: value.exists,
+                        value: value.exists.then_some(value.sha).flatten(),
                         warning: None,
                     });
                 }
                 Err(error) if !settings.check && !settings.update => {
                     return Ok(LookupLoad {
-                        value: value.exists,
+                        value: value.exists.then_some(value.sha).flatten(),
                         warning: Some(format!(
                             "using stale branch metadata for {owner}/{repo}@{branch} after refresh failed: {error}"
                         )),
@@ -732,8 +935,8 @@ fn load_branch_exists(
         CacheLookup::Miss => {}
     }
 
-    let (exists, etag) = match provider.fetch_branch(owner, repo, branch, None)? {
-        BranchFetch::Fresh { exists, etag } => (exists, etag),
+    let (exists, sha, etag) = match provider.fetch_branch(owner, repo, branch, None)? {
+        BranchFetch::Fresh { exists, sha, etag } => (exists, sha, etag),
         BranchFetch::NotModified => {
             return Err(anyhow!(
                 "metadata provider returned not-modified for {owner}/{repo}@{branch} without cached branch metadata"
@@ -749,10 +952,11 @@ fn load_branch_exists(
             etag,
             branch: branch.to_string(),
             exists,
+            sha: sha.clone(),
         },
     )?;
     Ok(LookupLoad {
-        value: exists,
+        value: if exists { sha } else { None },
         warning: None,
     })
 }
@@ -767,6 +971,42 @@ struct TagLoad {
 struct LookupLoad<T> {
     value: T,
     warning: Option<String>,
+}
+
+fn validate_local_reference(reference: &ReferenceReport, diagnostics: &mut Vec<Diagnostic>) {
+    if !matches!(
+        reference.parsed.kind,
+        ReferenceKind::LocalAction | ReferenceKind::LocalWorkflow
+    ) {
+        return;
+    }
+    let Some(rel) = reference.parsed.path.as_deref() else {
+        return;
+    };
+    let workflow_path = std::path::Path::new(&reference.file);
+    let base = workflow_path.parent().unwrap_or(std::path::Path::new("."));
+    let target_path = base.join(rel);
+    let candidate = if target_path.is_dir() {
+        let action_yml = target_path.join("action.yml");
+        let action_yaml = target_path.join("action.yaml");
+        if action_yml.exists() {
+            action_yml
+        } else if action_yaml.exists() {
+            action_yaml
+        } else {
+            target_path.clone()
+        }
+    } else {
+        target_path.clone()
+    };
+    if !candidate.exists() {
+        diagnostics.push(Diagnostic {
+            file: reference.file.clone(),
+            line: Some(reference.line),
+            message: format!("local reference does not exist on disk: {rel}"),
+            category: DiagnosticCategory::General,
+        });
+    }
 }
 
 fn handle_missing_ref(
@@ -827,7 +1067,7 @@ fn select_tag_update_target(
     }
     let mut diagnostic = None;
     if !current_exists {
-        let branch_exists = load_branch_exists(
+        let branch_lookup = load_branch_exists(
             settings,
             cache,
             provider,
@@ -835,8 +1075,8 @@ fn select_tag_update_target(
             reference.parsed.repo.as_deref().unwrap_or_default(),
             current,
         )?;
-        diagnostic = branch_exists.warning;
-        if branch_exists.value {
+        diagnostic = branch_lookup.warning;
+        if branch_lookup.value.is_some() {
             return Ok(TargetDecision {
                 target: None,
                 current_missing: false,
@@ -846,6 +1086,13 @@ fn select_tag_update_target(
     }
 
     let latest = latest_semver_tag(settings, tags, Some(current_ref.version.major));
+    let latest = latest.filter(|tag| {
+        if current_ref.precision != VersionPrecision::Full {
+            return true;
+        }
+        parse_version_tag(&tag.name)
+            .is_some_and(|target_version| target_version > current_ref.version)
+    });
     let target = latest
         .as_ref()
         .map(|tag| format_pin_style(settings.pin_style, current, &current_ref, tag));
@@ -881,7 +1128,7 @@ fn select_tag_update_target(
         && target != &latest.name
         && !tags.iter().any(|tag| tag.name == *target)
     {
-        let branch_exists = load_branch_exists(
+        let branch_lookup = load_branch_exists(
             settings,
             cache,
             provider,
@@ -889,10 +1136,10 @@ fn select_tag_update_target(
             reference.parsed.repo.as_deref().unwrap_or_default(),
             target,
         )?;
-        if let Some(warning) = branch_exists.warning {
+        if let Some(warning) = branch_lookup.warning {
             diagnostic = Some(warning);
         }
-        if !branch_exists.value {
+        if branch_lookup.value.is_none() {
             return Ok(TargetDecision {
                 target: None,
                 current_missing: false,
@@ -1207,6 +1454,7 @@ mod tests {
         ) -> Result<BranchFetch> {
             Ok(BranchFetch::Fresh {
                 exists: false,
+                sha: None,
                 etag: Some("etag-branch".to_string()),
             })
         }
@@ -1269,6 +1517,9 @@ mod tests {
             self.branch_calls.set(self.branch_calls.get() + 1);
             Ok(BranchFetch::Fresh {
                 exists: self.branch_exists,
+                sha: self
+                    .branch_exists
+                    .then_some("0123456789abcdef0123456789abcdef01234567".to_string()),
                 etag: Some("etag-branch".to_string()),
             })
         }
@@ -1304,6 +1555,8 @@ mod tests {
             schema_validation: false,
             recursive: false,
             threads: None,
+            validate: false,
+            pin_floating_to_sha: false,
         }
     }
 
@@ -1389,6 +1642,52 @@ mod tests {
 
         assert!(resolution.updates.is_empty());
         assert!(resolution.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn preserve_does_not_demote_full_pin_to_equivalent_minor_tag() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = settings(temp.path());
+        let provider = FakeProvider {
+            tags: vec![tag("v1.23"), tag("v1.23.0"), tag("v1.24"), tag("v1.24.0")],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("erlef/setup-beam@v1.24.0")],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(
+            resolution.updates.is_empty(),
+            "must not propose v1.24.0 -> v1.24 (same semver, lower precision); got {:?}",
+            resolution.updates
+        );
+        assert!(resolution.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn preserve_still_updates_full_pin_to_strictly_newer_tag() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = settings(temp.path());
+        let provider = FakeProvider {
+            tags: vec![tag("v1.24"), tag("v1.24.0"), tag("v1.25"), tag("v1.25.1")],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("erlef/setup-beam@v1.24.0")],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(resolution.updates.len(), 1);
+        assert_eq!(resolution.updates[0].target.as_deref(), Some("v1.25.1"));
     }
 
     #[test]
@@ -2005,5 +2304,199 @@ mod tests {
             lookup_mode: "tags",
             auth_fingerprint: "anonymous",
         })
+    }
+
+    #[test]
+    fn pin_floating_to_sha_rewrites_branch_to_sha() {
+        use super::RefKind;
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.pin_floating_to_sha = true;
+        let provider = BranchCheckingProvider {
+            tags: vec![tag("v1.0.0")],
+            branch_exists: true,
+            tag_calls: Cell::new(0),
+            branch_calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("kreuzberg-dev/actions/lint-docs@main")],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolution.updates.len(),
+            1,
+            "expected branch ref to be rewritten to SHA"
+        );
+        assert_eq!(
+            resolution.updates[0].target.as_deref(),
+            Some("0123456789abcdef0123456789abcdef01234567")
+        );
+        assert_eq!(provider.branch_calls.get(), 1);
+        assert_eq!(
+            resolution.resolved_ref_kinds,
+            vec![(0, RefKind::Branch)],
+            "branch ref should be reclassified"
+        );
+    }
+
+    #[test]
+    fn pin_floating_to_sha_rewrites_non_semver_tag_to_sha() {
+        use super::RefKind;
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.pin_floating_to_sha = true;
+        let provider = FakeProvider {
+            tags: vec![tag("stable"), tag("nightly")],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("dtolnay/rust-toolchain@stable")],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(resolution.updates.len(), 1);
+        assert_eq!(resolution.updates[0].current, "stable");
+        assert_eq!(resolution.updates[0].target.as_deref(), Some("sha-stable"));
+        assert_eq!(
+            resolution.resolved_ref_kinds,
+            vec![(0, RefKind::NonSemverTag)],
+        );
+    }
+
+    #[test]
+    fn default_scan_does_not_fetch_metadata_for_floating_refs() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = settings(temp.path());
+        let provider = BranchCheckingProvider {
+            tags: vec![tag("v1.0.0")],
+            branch_exists: true,
+            tag_calls: Cell::new(0),
+            branch_calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("kreuzberg-dev/actions/lint-docs@main")],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(resolution.updates.is_empty());
+        assert!(resolution.resolved_ref_kinds.is_empty());
+        assert_eq!(
+            provider.tag_calls.get(),
+            0,
+            "default scan must not fetch tags for branch refs"
+        );
+        assert_eq!(provider.branch_calls.get(), 0);
+    }
+
+    #[test]
+    fn validate_reports_missing_tag_when_tag_absent_upstream() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.validate = true;
+        let provider = FakeProvider {
+            tags: vec![tag("v4.0.0")],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("actions/checkout@v3.5.0")],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(
+            resolution
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("remote ref no longer exists")),
+            "validate should report missing upstream tag: {:?}",
+            resolution.diagnostics
+        );
+    }
+
+    #[test]
+    fn validate_passes_when_tag_exists_upstream() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.validate = true;
+        let provider = FakeProvider {
+            tags: vec![tag("v4.0.0"), tag("v4.1.0")],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("actions/checkout@v4.0.0")],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(
+            !resolution
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("remote ref no longer exists")),
+            "validate should not report present tag missing: {:?}",
+            resolution.diagnostics
+        );
+    }
+
+    #[test]
+    fn sha_advisory_emitted_when_newer_sha_available_without_latest_hash() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = settings(temp.path());
+        let pinned_sha = "1111111111111111111111111111111111111111";
+        let newer_sha = "2222222222222222222222222222222222222222";
+        let provider = FakeProvider {
+            tags: vec![
+                RemoteTag {
+                    name: "v4.0.0".to_string(),
+                    sha: pinned_sha.to_string(),
+                },
+                RemoteTag {
+                    name: "v4.1.0".to_string(),
+                    sha: newer_sha.to_string(),
+                },
+            ],
+            calls: Cell::new(0),
+        };
+
+        let raw = format!("actions/checkout@{pinned_sha}");
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference(&raw)],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(
+            resolution.updates.is_empty(),
+            "SHA refs must not produce updates without --latest-hash"
+        );
+        assert!(
+            resolution
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("--latest-hash")),
+            "expected SHA advisory diagnostic, got {:?}",
+            resolution.diagnostics
+        );
     }
 }

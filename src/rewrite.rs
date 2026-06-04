@@ -267,6 +267,8 @@ mod tests {
             schema_validation: false,
             recursive: false,
             threads: None,
+            validate: false,
+            pin_floating_to_sha: false,
         }
     }
 

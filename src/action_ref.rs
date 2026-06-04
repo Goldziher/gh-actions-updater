@@ -17,6 +17,8 @@ pub enum RefKind {
     SemverLikeTag,
     Sha,
     BranchOrUnknown,
+    Branch,
+    NonSemverTag,
     None,
 }
 
