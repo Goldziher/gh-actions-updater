@@ -76,6 +76,10 @@ jobs:
 
       - name: Smoke scan repository workflows
         run: cargo run --locked -- --no-cache --no-schema-validation --format json .github
+        env:
+          # Authenticate metadata lookups; the default unauthenticated REST rate
+          # limit (60/hr, shared per runner IP) intermittently returns 403.
+          GITHUB_TOKEN: ${{ github.token }}
 
   actionlint:
     name: GitHub Actions lint
@@ -114,19 +118,3 @@ jobs:
 
       - name: Run tests
         run: cargo test --locked --all-targets --all-features
-
-  release-config:
-    name: Release config
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-
-      - name: Check GoReleaser config
-        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7
-        with:
-          distribution: goreleaser
-          version: "~> v2"
-          args: check

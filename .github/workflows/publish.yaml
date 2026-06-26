@@ -164,11 +164,55 @@ jobs:
 
           echo "release_assets_exist=$release_assets_exist" >> "$GITHUB_OUTPUT"
 
-  release_assets:
-    name: Publish GitHub release assets
+  create_release:
+    name: Create GitHub release
     needs: meta
     if: needs.meta.outputs.release_assets_exist != 'true'
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
+
+      - name: Ensure the GitHub release exists as a draft
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.meta.outputs.tag }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists."
+          else
+            prerelease=""
+            case "$tag" in
+              *-rc.* | *-beta* | *-alpha*) prerelease="--prerelease" ;;
+            esac
+            gh release create "$tag" --title "$tag" --notes "Release $tag" --verify-tag --draft $prerelease
+          fi
+
+  build:
+    name: Build binaries / ${{ matrix.triple }}
+    needs: [meta, create_release]
+    if: needs.meta.outputs.release_assets_exist != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - triple: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - triple: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+          # Both macOS targets build on Apple Silicon; x86_64 is a cross-compile
+          # (the macOS toolchain targets both arches from one host).
+          - triple: x86_64-apple-darwin
+            os: macos-latest
+          - triple: aarch64-apple-darwin
+            os: macos-latest
+          - triple: x86_64-pc-windows-gnu
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -179,87 +223,158 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          targets: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu,x86_64-apple-darwin,aarch64-apple-darwin,x86_64-pc-windows-gnu
+          targets: ${{ matrix.triple }}
 
-      - name: Install cross-build tools
-        run: brew install zig mingw-w64
-
-      - name: Build and publish GitHub release assets
-        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7
+      - name: Setup cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
         with:
-          distribution: goreleaser
-          version: "~> v2"
-          args: release --clean --skip=validate
+          key: ${{ matrix.triple }}
+
+      - name: Install MinGW (Windows GNU cross-compile)
+        if: matrix.triple == 'x86_64-pc-windows-gnu'
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
+
+      - name: Build release binary
+        if: matrix.triple != 'x86_64-pc-windows-gnu'
+        run: cargo build --release --locked --target ${{ matrix.triple }}
+
+      - name: Build release binary (Windows GNU cross-compile)
+        if: matrix.triple == 'x86_64-pc-windows-gnu'
+        env:
+          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
+        run: cargo build --release --locked --target ${{ matrix.triple }}
+
+      - name: Package release
+        run: ./scripts/package-release.sh ${{ matrix.triple }}
+
+      - name: Upload to GitHub release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TOKEN }}
-          GORELEASER_CURRENT_TAG: ${{ needs.meta.outputs.tag }}
-
-  request_homebrew_bottles:
-    name: Request Homebrew bottles
-    needs: [meta, release_assets]
-    if: always() && needs.meta.result == 'success' && (needs.release_assets.result == 'success' || needs.release_assets.result == 'skipped') && !contains(needs.meta.outputs.tag, '-')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Dispatch tap bottle workflow
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TOKEN }}
         run: |
           set -euo pipefail
-          title="Bottle gh-actions-updater ${{ needs.meta.outputs.tag }}"
-          gh workflow run bottle.yml \
-            --repo Goldziher/homebrew-tap \
-            -f formula=gh-actions-updater \
-            -f tag="${{ needs.meta.outputs.tag }}" \
-            -f release_repo="${{ github.repository }}"
+          tag="${{ needs.meta.outputs.tag }}"
+          triple="${{ matrix.triple }}"
+          if [ "$triple" = "x86_64-pc-windows-gnu" ]; then
+            archive="gh-actions-updater-${triple}.zip"
+          else
+            archive="gh-actions-updater-${triple}.tar.gz"
+          fi
+          if [ ! -f "$archive" ]; then
+            echo "::error::Archive not found: $archive"
+            exit 1
+          fi
+          gh release upload "$tag" "$archive" --clobber
 
-          run_id=""
-          for _ in {1..30}; do
-            run_id="$(
-              gh run list \
-                --repo Goldziher/homebrew-tap \
-                --workflow bottle.yml \
-                --limit 20 \
-                --json databaseId,displayTitle \
-                --jq ".[] | select(.displayTitle == \"$title\") | .databaseId" \
-                | head -n 1
-            )"
-            if [ -n "$run_id" ]; then
-              break
+  checksums:
+    name: Generate and upload checksums
+    needs: [meta, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
+
+      - name: Verify all 5 expected archives are present
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.meta.outputs.tag }}"
+
+          expected=(
+            "gh-actions-updater-x86_64-unknown-linux-gnu.tar.gz"
+            "gh-actions-updater-aarch64-unknown-linux-gnu.tar.gz"
+            "gh-actions-updater-x86_64-apple-darwin.tar.gz"
+            "gh-actions-updater-aarch64-apple-darwin.tar.gz"
+            "gh-actions-updater-x86_64-pc-windows-gnu.zip"
+          )
+
+          gh release view "$tag" --json assets -q '.assets[].name' > /tmp/release_assets.txt || true
+
+          missing_count=0
+          for expected_asset in "${expected[@]}"; do
+            if ! grep -q "^${expected_asset}$" /tmp/release_assets.txt 2>/dev/null; then
+              echo "::error::Missing expected archive: $expected_asset"
+              missing_count=$((missing_count + 1))
             fi
-            sleep 10
           done
 
-          if [ -z "$run_id" ]; then
-            echo "timed out waiting for dispatched bottle workflow to appear" >&2
+          if [ $missing_count -gt 0 ]; then
+            echo "::error::Release is incomplete: $missing_count of 5 platform archives missing."
             exit 1
           fi
 
-          run_url="$(gh run view "$run_id" --repo Goldziher/homebrew-tap --json url --jq .url)"
-          echo "Watching bottle workflow: $run_url"
-          while true; do
-            state="$(
-              gh run view "$run_id" \
-                --repo Goldziher/homebrew-tap \
-                --json status,conclusion \
-                --jq '"\(.status) \(.conclusion // "")"'
-            )"
-            status="${state%% *}"
-            conclusion="${state#* }"
-            if [ "$status" = "completed" ]; then
-              if [ "$conclusion" = "success" ]; then
-                exit 0
-              fi
-              echo "bottle workflow failed with conclusion: $conclusion" >&2
-              exit 1
-            fi
-            sleep 30
+          echo "✓ All 5 expected archives present"
+
+      - name: Download archives and generate checksums
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.meta.outputs.tag }}"
+
+          gh release view "$tag" --json assets -q '.assets[] | select(.name | test("gh-actions-updater-.+\\.(tar\\.gz|zip)$")).name' | while read -r asset; do
+            echo "Downloading $asset..."
+            gh release download "$tag" -p "$asset" -O "$asset"
           done
+
+          sha256sum gh-actions-updater-*.tar.gz gh-actions-updater-*.zip | sort > checksums.txt
+
+          echo "✓ Generated checksums file"
+          cat checksums.txt
+
+      - name: Upload checksums to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ needs.meta.outputs.tag }}"
+          gh release upload "$tag" checksums.txt --clobber
+          echo "✓ Uploaded checksums to release"
+
+  finalize_release:
+    name: Publish GitHub release
+    needs: [meta, checksums]
+    if: always() && needs.meta.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Promote draft to published release once complete
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.meta.outputs.tag }}"
+
+          required=(
+            "gh-actions-updater-x86_64-unknown-linux-gnu.tar.gz"
+            "gh-actions-updater-aarch64-unknown-linux-gnu.tar.gz"
+            "gh-actions-updater-x86_64-apple-darwin.tar.gz"
+            "gh-actions-updater-aarch64-apple-darwin.tar.gz"
+            "gh-actions-updater-x86_64-pc-windows-gnu.zip"
+            "checksums.txt"
+          )
+
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' \
+            > /tmp/assets.txt || true
+          missing=0
+          for asset in "${required[@]}"; do
+            if ! grep -qx "$asset" /tmp/assets.txt; then
+              echo "::error::release $tag is missing $asset"
+              missing=$((missing + 1))
+            fi
+          done
+          if [ "$missing" -gt 0 ]; then
+            echo "::error::release $tag is incomplete ($missing required assets missing); leaving it as a draft"
+            exit 1
+          fi
+
+          gh release edit "$tag" --draft=false --repo "$GITHUB_REPOSITORY"
+          echo "✓ Promoted $tag to a published release"
 
   publish_crates:
     name: Publish crates.io
-    needs: [meta, release_assets]
-    if: always() && needs.meta.result == 'success' && needs.meta.outputs.crates_exists != 'true' && (needs.release_assets.result == 'success' || needs.release_assets.result == 'skipped')
+    needs: meta
+    if: needs.meta.outputs.crates_exists != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -280,12 +395,22 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates_auth.outputs.token }}
         run: |
           set -euo pipefail
-          cargo publish --locked
+          if cargo publish --locked 2>cargo-publish.err; then
+            exit 0
+          fi
+
+          if grep -Eq "crate .* already exists" cargo-publish.err; then
+            echo "crate already published; skipping"
+            exit 0
+          fi
+
+          cat cargo-publish.err >&2
+          exit 1
 
   publish_npm:
     name: Publish npm
-    needs: [meta, release_assets]
-    if: always() && needs.meta.result == 'success' && needs.meta.outputs.npm_exists != 'true' && (needs.release_assets.result == 'success' || needs.release_assets.result == 'skipped')
+    needs: [meta, finalize_release]
+    if: needs.meta.outputs.npm_exists != 'true' && needs.finalize_release.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -315,8 +440,8 @@ jobs:
 
   publish_pypi:
     name: Publish PyPI
-    needs: [meta, release_assets]
-    if: always() && needs.meta.result == 'success' && needs.meta.outputs.pypi_exists != 'true' && (needs.release_assets.result == 'success' || needs.release_assets.result == 'skipped')
+    needs: [meta, finalize_release]
+    if: needs.meta.outputs.pypi_exists != 'true' && needs.finalize_release.result == 'success'
     runs-on: ubuntu-latest
     environment: pypi
     steps:
@@ -344,3 +469,43 @@ jobs:
         with:
           packages-dir: pip-package/dist
           skip-existing: true
+
+  publish_homebrew:
+    name: Update Homebrew formula
+    needs: [meta, finalize_release]
+    if: needs.finalize_release.result == 'success' && !contains(needs.meta.outputs.tag, '-')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
+
+      - name: Generate formula and push to tap
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TOKEN: ${{ secrets.HOMEBREW_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HOMEBREW_TOKEN:-}" ]; then
+            echo "HOMEBREW_TOKEN not set — skipping the Homebrew formula update."
+            exit 0
+          fi
+          tag="${{ needs.meta.outputs.tag }}"
+          version="${{ needs.meta.outputs.version }}"
+          gh release download "$tag" -p "checksums.txt" -O checksums.txt
+          ./scripts/update-homebrew-formula.sh "$version" checksums.txt > gh-actions-updater.rb
+
+          git clone --depth 1 "https://x-access-token:${HOMEBREW_TOKEN}@github.com/Goldziher/homebrew-tap.git" tap
+          cp gh-actions-updater.rb tap/Formula/gh-actions-updater.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/gh-actions-updater.rb
+          if git diff --cached --quiet; then
+            echo "Formula already up to date."
+          else
+            git commit -m "gh-actions-updater ${version}"
+            git push
+          fi
