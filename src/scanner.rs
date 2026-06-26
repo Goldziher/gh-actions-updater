@@ -301,7 +301,7 @@ fn collect_string_field(
             .as_str()
             .map(str::to_string)
             .unwrap_or_default();
-        let value_span = find_value_span(value_node, &raw)
+        let value_span = find_value_span(value_node, content, &raw)
             .and_then(|span| find_value_span_in_source(content, span, &raw));
         let update_ignored = line_has_ignore_comment(content, key_node.span.start.line());
         values.push(UseValue {
@@ -346,13 +346,32 @@ fn mapping_get_pair_marked<'a>(
         .find(|(mapping_key, _)| mapping_key.data.as_str() == Some(key))
 }
 
-fn find_value_span(value: &MarkedYaml<'_>, raw: &str) -> Option<ByteSpan> {
-    let start = value.span.start.index();
-    let end = value.span.end.index();
-    if raw.is_empty() || start >= end {
+fn find_value_span(value: &MarkedYaml<'_>, content: &str, raw: &str) -> Option<ByteSpan> {
+    // saphyr's `Marker::index()` is a *char* index into the source, but every
+    // downstream consumer slices `content` by byte offset. Convert here so a
+    // multibyte character (e.g. an em-dash in a description) earlier in the file
+    // does not shift the span and break the rewrite.
+    let start_char = value.span.start.index();
+    let end_char = value.span.end.index();
+    if raw.is_empty() || start_char >= end_char {
         return None;
     }
+    let start = char_index_to_byte_offset(content, start_char)?;
+    let end = char_index_to_byte_offset(content, end_char)?;
     Some(ByteSpan { start, end })
+}
+
+/// Translate a character index (as reported by the YAML parser) into a byte
+/// offset into `content`. Returns `None` if the index is out of range.
+fn char_index_to_byte_offset(content: &str, char_index: usize) -> Option<usize> {
+    let mut indices = content.char_indices();
+    match indices.nth(char_index) {
+        Some((byte_offset, _)) => Some(byte_offset),
+        // A char index pointing one past the final character maps to the end of
+        // the string; anything beyond that is out of range.
+        None if char_index == content.chars().count() => Some(content.len()),
+        None => None,
+    }
 }
 
 fn find_ref_span_fallback(
@@ -611,6 +630,36 @@ jobs:
         let span = refs[0].ref_span.unwrap();
 
         assert_eq!(&content[span.start..span.end], "v4");
+    }
+
+    #[test]
+    fn rewrite_span_survives_multibyte_chars_before_value() {
+        // An em-dash and box-drawing characters earlier in the file shift byte
+        // offsets relative to the parser's char indices. The span must still
+        // land exactly on the ref so the rewrite stays supported.
+        let content = "\
+jobs:
+  test:
+    steps:
+      # \u{2500}\u{2500}\u{2500} publish \u{2014} release \u{2500}\u{2500}\u{2500}
+      - name: Dry run \u{2014} skip publishes
+        uses: rubygems/configure-rubygems-credentials@v2.0.0
+";
+        let refs = scan_content(
+            Path::new(".github/workflows/ci.yml"),
+            FileKind::Workflow,
+            content,
+        )
+        .unwrap();
+        assert_eq!(refs.len(), 1);
+        let reference = &refs[0];
+        assert!(
+            reference.rewrite_supported,
+            "rewrite should be supported, got reason: {:?}",
+            reference.rewrite_reason
+        );
+        let span = reference.ref_span.unwrap();
+        assert_eq!(&content[span.start..span.end], "v2.0.0");
     }
 
     #[test]
