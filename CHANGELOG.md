@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.7] - 2026-06-26
+
+### Fixed
+
+- Rewrites no longer break when a multibyte character (for example an em-dash or
+  box-drawing character in a step name or workflow `on` description) appears
+  before a `uses:` reference. The parser reports char-based offsets, which were
+  treated as byte offsets when slicing the source; references after multibyte
+  content were misreported as "uses value is not a simple single-line rewrite
+  target" and skipped. Offsets are now converted to bytes before slicing.
+
 ## [0.1.6] - 2026-06-04
 
 ### Added

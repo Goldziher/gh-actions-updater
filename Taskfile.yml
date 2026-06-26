@@ -47,7 +47,6 @@ tasks:
         data["version"] = version
         package.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
-        replace("README.md", r"^Version: `.*`", f"Version: `{version}`")
         replace("README.md", r'"version": ".*"', f'"version": "{version}"')
         replace("README.md", r"rev: v[0-9][^\n]*", f"rev: v{version}")
 
