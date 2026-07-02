@@ -156,18 +156,12 @@ mod tests {
 
     #[test]
     fn classifies_local_and_docker_refs() {
-        assert_eq!(
-            parse_uses("./.github/actions/build").kind,
-            ReferenceKind::LocalAction
-        );
+        assert_eq!(parse_uses("./.github/actions/build").kind, ReferenceKind::LocalAction);
         assert_eq!(
             parse_uses("./.github/workflows/reuse.yml").kind,
             ReferenceKind::LocalWorkflow
         );
-        assert_eq!(
-            parse_uses("docker://alpine:3").kind,
-            ReferenceKind::DockerImage
-        );
+        assert_eq!(parse_uses("docker://alpine:3").kind, ReferenceKind::DockerImage);
     }
 
     #[test]

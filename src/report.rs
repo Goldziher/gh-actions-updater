@@ -177,18 +177,11 @@ impl RunReport {
         } else {
             self.style("diagnostics", Color::Yellow)
         };
-        writeln!(
-            stdout,
-            "{} {}",
-            self.style("gh-actions-updater", Color::Cyan),
-            status
-        )?;
+        writeln!(stdout, "{} {}", self.style("gh-actions-updater", Color::Cyan), status)?;
         writeln!(
             stdout,
             "  scanned {} file(s), found {} reference(s), {} update(s)",
-            self.summary.files_scanned,
-            self.summary.references_found,
-            self.summary.updates_available
+            self.summary.files_scanned, self.summary.references_found, self.summary.updates_available
         )?;
 
         if !self.files.is_empty() {
@@ -241,11 +234,7 @@ impl RunReport {
             }
         } else {
             writeln!(stdout)?;
-            writeln!(
-                stdout,
-                "{}",
-                self.style("No updates available.", Color::Green)
-            )?;
+            writeln!(stdout, "{}", self.style("No updates available.", Color::Green))?;
         }
 
         if !self.diffs.is_empty() {

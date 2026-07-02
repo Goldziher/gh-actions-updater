@@ -74,10 +74,7 @@ pub struct ScanOutput {
 
 pub fn scan_files(paths: &[PathBuf], settings: &Settings) -> Result<ScanOutput> {
     let mut output = ScanOutput::default();
-    let scanned: Vec<ScanFileResult> = paths
-        .par_iter()
-        .map(|path| scan_file(path, settings))
-        .collect();
+    let scanned: Vec<ScanFileResult> = paths.par_iter().map(|path| scan_file(path, settings)).collect();
 
     for scanned_file in scanned {
         if let Some(diagnostic) = scanned_file.failure {
@@ -194,8 +191,8 @@ fn scan_content(path: &Path, kind: FileKind, content: &str) -> Result<Vec<Refere
         return Ok(Vec::new());
     }
 
-    let docs = MarkedYaml::load_from_str(content)
-        .with_context(|| format!("failed to parse YAML in {}", path.display()))?;
+    let docs =
+        MarkedYaml::load_from_str(content).with_context(|| format!("failed to parse YAML in {}", path.display()))?;
     let Some(yaml) = docs.first() else {
         return Ok(Vec::new());
     };
@@ -247,38 +244,31 @@ struct UseValue {
 }
 
 fn collect_workflow_uses(yaml: &MarkedYaml<'_>, content: &str, values: &mut Vec<UseValue>) {
-    let Some(jobs) = mapping_get_marked(yaml, "jobs").and_then(|value| value.data.as_mapping())
-    else {
+    let Some(jobs) = mapping_get_marked(yaml, "jobs").and_then(|value| value.data.as_mapping()) else {
         return;
     };
 
     for job in jobs.values().filter_map(|value| value.data.as_mapping()) {
         collect_string_field(job, "uses", content, values);
 
-        if let Some(steps) =
-            mapping_get_value_marked(job, "steps").and_then(|value| value.data.as_vec())
-        {
+        if let Some(steps) = mapping_get_value_marked(job, "steps").and_then(|value| value.data.as_vec()) {
             collect_step_uses(steps, content, values);
         }
     }
 }
 
 fn collect_action_metadata_uses(yaml: &MarkedYaml<'_>, content: &str, values: &mut Vec<UseValue>) {
-    let Some(runs) = mapping_get_marked(yaml, "runs").and_then(|value| value.data.as_mapping())
-    else {
+    let Some(runs) = mapping_get_marked(yaml, "runs").and_then(|value| value.data.as_mapping()) else {
         return;
     };
-    let Some(using) = mapping_get_value_marked(runs, "using").and_then(|value| value.data.as_str())
-    else {
+    let Some(using) = mapping_get_value_marked(runs, "using").and_then(|value| value.data.as_str()) else {
         return;
     };
     if !using.eq_ignore_ascii_case("composite") {
         return;
     }
 
-    if let Some(steps) =
-        mapping_get_value_marked(runs, "steps").and_then(|value| value.data.as_vec())
-    {
+    if let Some(steps) = mapping_get_value_marked(runs, "steps").and_then(|value| value.data.as_vec()) {
         collect_step_uses(steps, content, values);
     }
 }
@@ -296,13 +286,9 @@ fn collect_string_field(
     values: &mut Vec<UseValue>,
 ) {
     if let Some((key_node, value_node)) = mapping_get_pair_marked(mapping, key) {
-        let raw = value_node
-            .data
-            .as_str()
-            .map(str::to_string)
-            .unwrap_or_default();
-        let value_span = find_value_span(value_node, content, &raw)
-            .and_then(|span| find_value_span_in_source(content, span, &raw));
+        let raw = value_node.data.as_str().map(str::to_string).unwrap_or_default();
+        let value_span =
+            find_value_span(value_node, content, &raw).and_then(|span| find_value_span_in_source(content, span, &raw));
         let update_ignored = line_has_ignore_comment(content, key_node.span.start.line());
         values.push(UseValue {
             raw,
@@ -374,19 +360,12 @@ fn char_index_to_byte_offset(content: &str, char_index: usize) -> Option<usize> 
     }
 }
 
-fn find_ref_span_fallback(
-    content: &str,
-    _raw: &str,
-    parser_span: Option<ByteSpan>,
-) -> Option<ByteSpan> {
+fn find_ref_span_fallback(content: &str, _raw: &str, parser_span: Option<ByteSpan>) -> Option<ByteSpan> {
     // If we have a parser span, try to find the @ symbol within that region.
     // This is a fallback for when find_value_span_in_source fails (e.g., due to
     // whitespace normalization or other parser-specific quirks).
     if let Some(span) = parser_span {
-        if span.end > content.len()
-            || !content.is_char_boundary(span.start)
-            || !content.is_char_boundary(span.end)
-        {
+        if span.end > content.len() || !content.is_char_boundary(span.start) || !content.is_char_boundary(span.end) {
             return None;
         }
         let region = &content[span.start..span.end];
@@ -432,12 +411,7 @@ fn find_value_span_in_source(content: &str, parser_span: ByteSpan, raw: &str) ->
     })
 }
 
-fn schema_diagnostics(
-    path: &Path,
-    kind: FileKind,
-    content: &str,
-    settings: &Settings,
-) -> Vec<Diagnostic> {
+fn schema_diagnostics(path: &Path, kind: FileKind, content: &str, settings: &Settings) -> Vec<Diagnostic> {
     if content.trim().is_empty() {
         return vec![Diagnostic {
             file: path.display().to_string(),
@@ -480,10 +454,7 @@ fn schema_diagnostics(
         diagnostics.push(Diagnostic {
             file: path.display().to_string(),
             line: None,
-            message: format!(
-                "schema validation failed at {}: {error}",
-                error.instance_path()
-            ),
+            message: format!("schema validation failed at {}: {error}", error.instance_path()),
             category: DiagnosticCategory::Schema,
         });
     }
@@ -503,18 +474,13 @@ fn schema_validator(kind: FileKind) -> &'static Result<jsonschema::Validator, St
     static ACTION: OnceLock<Result<jsonschema::Validator, String>> = OnceLock::new();
 
     match kind {
-        FileKind::Workflow => {
-            WORKFLOW.get_or_init(|| compile_schema(include_str!("schemas/github-workflow.json")))
-        }
-        FileKind::ActionMetadata => {
-            ACTION.get_or_init(|| compile_schema(include_str!("schemas/github-action.json")))
-        }
+        FileKind::Workflow => WORKFLOW.get_or_init(|| compile_schema(include_str!("schemas/github-workflow.json"))),
+        FileKind::ActionMetadata => ACTION.get_or_init(|| compile_schema(include_str!("schemas/github-action.json"))),
     }
 }
 
 fn compile_schema(schema: &str) -> Result<jsonschema::Validator, String> {
-    let schema: Value =
-        serde_json::from_str(schema).map_err(|error| format!("failed to load schema: {error}"))?;
+    let schema: Value = serde_json::from_str(schema).map_err(|error| format!("failed to load schema: {error}"))?;
     jsonschema::validator_for(&schema).map_err(|error| error.to_string())
 }
 
@@ -532,14 +498,11 @@ fn yaml_to_json(yaml: &Yaml<'_>) -> Value {
         Yaml::Mapping(mapping) => {
             let mut object = Map::new();
             for (key, value) in mapping {
-                let key = key
-                    .as_str()
-                    .map(str::to_string)
-                    .unwrap_or_else(|| match key {
-                        Yaml::Value(Scalar::Integer(value)) => value.to_string(),
-                        Yaml::Value(Scalar::Boolean(value)) => value.to_string(),
-                        _ => serde_json::to_string(&yaml_to_json(key)).unwrap_or_default(),
-                    });
+                let key = key.as_str().map(str::to_string).unwrap_or_else(|| match key {
+                    Yaml::Value(Scalar::Integer(value)) => value.to_string(),
+                    Yaml::Value(Scalar::Boolean(value)) => value.to_string(),
+                    _ => serde_json::to_string(&yaml_to_json(key)).unwrap_or_default(),
+                });
                 object.insert(key, yaml_to_json(value));
             }
             Value::Object(object)
@@ -566,12 +529,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker://alpine:3
 "#;
-        let refs = scan_content(
-            Path::new(".github/workflows/ci.yml"),
-            FileKind::Workflow,
-            content,
-        )
-        .unwrap();
+        let refs = scan_content(Path::new(".github/workflows/ci.yml"), FileKind::Workflow, content).unwrap();
         assert_eq!(refs.len(), 3);
         assert_eq!(refs[0].parsed.kind, ReferenceKind::ReusableWorkflow);
         assert_eq!(refs[1].parsed.kind, ReferenceKind::RemoteAction);
@@ -586,8 +544,7 @@ runs:
   steps:
     - uses: actions/setup-node@v4
 "#;
-        let refs =
-            scan_content(Path::new("action.yml"), FileKind::ActionMetadata, content).unwrap();
+        let refs = scan_content(Path::new("action.yml"), FileKind::ActionMetadata, content).unwrap();
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].raw, "actions/setup-node@v4");
     }
@@ -601,12 +558,7 @@ jobs:
       # uses: actions/checkout@v4
       - uses: actions/checkout@v4
 "#;
-        let refs = scan_content(
-            Path::new(".github/workflows/ci.yml"),
-            FileKind::Workflow,
-            content,
-        )
-        .unwrap();
+        let refs = scan_content(Path::new(".github/workflows/ci.yml"), FileKind::Workflow, content).unwrap();
         let span = refs[0].ref_span.unwrap();
 
         assert_eq!(&content[span.start..span.end], "v4");
@@ -621,12 +573,7 @@ jobs:
     steps:
       - uses: "actions/checkout@v4"
 "#;
-        let refs = scan_content(
-            Path::new(".github/workflows/ci.yml"),
-            FileKind::Workflow,
-            content,
-        )
-        .unwrap();
+        let refs = scan_content(Path::new(".github/workflows/ci.yml"), FileKind::Workflow, content).unwrap();
         let span = refs[0].ref_span.unwrap();
 
         assert_eq!(&content[span.start..span.end], "v4");
@@ -645,12 +592,7 @@ jobs:
       - name: Dry run \u{2014} skip publishes
         uses: rubygems/configure-rubygems-credentials@v2.0.0
 ";
-        let refs = scan_content(
-            Path::new(".github/workflows/ci.yml"),
-            FileKind::Workflow,
-            content,
-        )
-        .unwrap();
+        let refs = scan_content(Path::new(".github/workflows/ci.yml"), FileKind::Workflow, content).unwrap();
         assert_eq!(refs.len(), 1);
         let reference = &refs[0];
         assert!(
@@ -669,8 +611,7 @@ runs:
   using: node20
   main: dist/index.js
 "#;
-        let refs =
-            scan_content(Path::new("action.yml"), FileKind::ActionMetadata, content).unwrap();
+        let refs = scan_content(Path::new("action.yml"), FileKind::ActionMetadata, content).unwrap();
         assert!(refs.is_empty());
     }
 
@@ -682,12 +623,7 @@ jobs:
     steps:
       - uses: ${{ inputs.action }}
 "#;
-        let refs = scan_content(
-            Path::new(".github/workflows/ci.yml"),
-            FileKind::Workflow,
-            content,
-        )
-        .unwrap();
+        let refs = scan_content(Path::new(".github/workflows/ci.yml"), FileKind::Workflow, content).unwrap();
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].parsed.kind, ReferenceKind::Malformed);
     }
@@ -700,12 +636,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4 # gau: ignore
 "#;
-        let refs = scan_content(
-            Path::new(".github/workflows/ci.yml"),
-            FileKind::Workflow,
-            content,
-        )
-        .unwrap();
+        let refs = scan_content(Path::new(".github/workflows/ci.yml"), FileKind::Workflow, content).unwrap();
         assert!(refs[0].update_ignored);
     }
 
@@ -720,12 +651,7 @@ jobs:
         with:
           uses: nested/data@v1
 "#;
-        let refs = scan_content(
-            Path::new(".github/workflows/ci.yml"),
-            FileKind::Workflow,
-            content,
-        )
-        .unwrap();
+        let refs = scan_content(Path::new(".github/workflows/ci.yml"), FileKind::Workflow, content).unwrap();
         assert!(refs.is_empty());
     }
 
@@ -740,12 +666,7 @@ jobs:
       - name: Setup
         uses: actions/setup-node@v20
 "#;
-        let refs = scan_content(
-            Path::new(".github/workflows/ci.yml"),
-            FileKind::Workflow,
-            content,
-        )
-        .unwrap();
+        let refs = scan_content(Path::new(".github/workflows/ci.yml"), FileKind::Workflow, content).unwrap();
         assert_eq!(refs.len(), 2);
         assert!(refs[0].rewrite_supported, "First ref should be rewritable");
         assert!(refs[1].rewrite_supported, "Second ref should be rewritable");
@@ -764,17 +685,9 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - uses: astral-sh/setup-uv@v7.6.0
 "#;
-        let refs = scan_content(
-            Path::new(".github/workflows/ci.yml"),
-            FileKind::Workflow,
-            content,
-        )
-        .unwrap();
+        let refs = scan_content(Path::new(".github/workflows/ci.yml"), FileKind::Workflow, content).unwrap();
         assert_eq!(refs.len(), 2);
-        assert!(
-            refs[0].rewrite_supported,
-            "Gradle action should be rewritable"
-        );
+        assert!(refs[0].rewrite_supported, "Gradle action should be rewritable");
         assert_eq!(refs[0].parsed.owner.as_deref(), Some("gradle"));
         assert_eq!(refs[0].parsed.repo.as_deref(), Some("actions"));
         assert_eq!(refs[0].parsed.path.as_deref(), Some("setup-gradle"));
@@ -797,12 +710,7 @@ jobs:
       - uses: actions/checkout@v6 # pinned to v6
       - uses: actions/setup-node@v20 # latest LTS
 "#;
-        let refs = scan_content(
-            Path::new(".github/workflows/ci.yml"),
-            FileKind::Workflow,
-            content,
-        )
-        .unwrap();
+        let refs = scan_content(Path::new(".github/workflows/ci.yml"), FileKind::Workflow, content).unwrap();
         assert_eq!(refs.len(), 2);
         assert!(refs[0].rewrite_supported, "Checkout should be rewritable");
         assert!(refs[1].rewrite_supported, "Setup-node should be rewritable");

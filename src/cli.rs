@@ -24,11 +24,7 @@ pub struct Cli {
     #[arg(short = 'r', long, help = "Scan nested GitHub Actions surfaces")]
     pub recursive: bool,
 
-    #[arg(
-        long = "threads",
-        value_name = "N",
-        help = "Override worker thread count"
-    )]
+    #[arg(long = "threads", value_name = "N", help = "Override worker thread count")]
     pub threads: Option<usize>,
 
     #[arg(long, help = "Write a starter .gh-actions-updater.toml")]
@@ -40,11 +36,7 @@ pub struct Cli {
     #[arg(long = "output", value_name = "PATH", help = "Output path for --init")]
     pub output: Option<PathBuf>,
 
-    #[arg(
-        long = "cache-dir",
-        value_name = "PATH",
-        help = "Override metadata cache directory"
-    )]
+    #[arg(long = "cache-dir", value_name = "PATH", help = "Override metadata cache directory")]
     pub cache_dir: Option<PathBuf>,
 
     #[arg(

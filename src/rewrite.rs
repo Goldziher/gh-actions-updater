@@ -36,9 +36,10 @@ pub fn apply_updates(settings: &Settings, updates: &[UpdateReport]) -> Result<Re
             result.diagnostics.push(Diagnostic {
                 file: update.file.clone(),
                 line: Some(update.line),
-                message: update.rewrite_reason.clone().unwrap_or_else(|| {
-                    "update skipped because no safe source span was found".to_string()
-                }),
+                message: update
+                    .rewrite_reason
+                    .clone()
+                    .unwrap_or_else(|| "update skipped because no safe source span was found".to_string()),
                 category: DiagnosticCategory::General,
             });
             continue;
@@ -47,9 +48,10 @@ pub fn apply_updates(settings: &Settings, updates: &[UpdateReport]) -> Result<Re
             result.diagnostics.push(Diagnostic {
                 file: update.file.clone(),
                 line: Some(update.line),
-                message: update.rewrite_reason.clone().unwrap_or_else(|| {
-                    "update skipped because the reference is not rewrite-safe".to_string()
-                }),
+                message: update
+                    .rewrite_reason
+                    .clone()
+                    .unwrap_or_else(|| "update skipped because the reference is not rewrite-safe".to_string()),
                 category: DiagnosticCategory::General,
             });
             continue;
@@ -75,15 +77,13 @@ pub fn apply_updates(settings: &Settings, updates: &[UpdateReport]) -> Result<Re
             continue;
         }
 
-        let original =
-            fs::read_to_string(file).with_context(|| format!("failed to read {file}"))?;
+        let original = fs::read_to_string(file).with_context(|| format!("failed to read {file}"))?;
         if !spans_are_valid(&original, &replacements) {
             for replacement in replacements {
                 result.diagnostics.push(Diagnostic {
                     file: file.to_string(),
                     line: Some(replacement.line),
-                    message: "update skipped because the source span no longer matches the file"
-                        .to_string(),
+                    message: "update skipped because the source span no longer matches the file".to_string(),
                     category: DiagnosticCategory::General,
                 });
             }
@@ -92,10 +92,7 @@ pub fn apply_updates(settings: &Settings, updates: &[UpdateReport]) -> Result<Re
 
         let mut rewritten = original.clone();
         for replacement in replacements.iter().rev() {
-            rewritten.replace_range(
-                replacement.span.start..replacement.span.end,
-                &replacement.target,
-            );
+            rewritten.replace_range(replacement.span.start..replacement.span.end, &replacement.target);
         }
 
         if rewritten == original {
@@ -104,9 +101,7 @@ pub fn apply_updates(settings: &Settings, updates: &[UpdateReport]) -> Result<Re
 
         result.would_change = true;
         if settings.diff {
-            result
-                .diffs
-                .push(render_unified_diff(file, &original, &rewritten));
+            result.diffs.push(render_unified_diff(file, &original, &rewritten));
         }
         if !settings.dry_run {
             fs::write(file, rewritten).with_context(|| format!("failed to write {file}"))?;
@@ -146,8 +141,7 @@ fn render_unified_diff(file: &str, original: &str, rewritten: &str) -> String {
     let mut suffix = 0;
     while suffix < original_lines.len().saturating_sub(prefix)
         && suffix < rewritten_lines.len().saturating_sub(prefix)
-        && original_lines[original_lines.len() - 1 - suffix]
-            == rewritten_lines[rewritten_lines.len() - 1 - suffix]
+        && original_lines[original_lines.len() - 1 - suffix] == rewritten_lines[rewritten_lines.len() - 1 - suffix]
     {
         suffix += 1;
     }
@@ -192,11 +186,7 @@ struct DiffWindow {
     rewritten_hunk_end: usize,
 }
 
-fn render_diff_hunk(
-    original_lines: &[&str],
-    rewritten_lines: &[&str],
-    window: DiffWindow,
-) -> String {
+fn render_diff_hunk(original_lines: &[&str], rewritten_lines: &[&str], window: DiffWindow) -> String {
     let mut body = String::new();
     for line in &original_lines[window.hunk_start..window.change_start] {
         body.push(' ');
@@ -284,10 +274,7 @@ mod tests {
             line: 4,
             current: "v4".to_string(),
             target: Some("v4.2.0".to_string()),
-            ref_span: Some(ByteSpan {
-                start,
-                end: start + 2,
-            }),
+            ref_span: Some(ByteSpan { start, end: start + 2 }),
             rewrite_supported: true,
             rewrite_reason: None,
         };
@@ -314,10 +301,7 @@ mod tests {
             line: 4,
             current: "v4".to_string(),
             target: Some("v4.2.0".to_string()),
-            ref_span: Some(ByteSpan {
-                start,
-                end: start + 2,
-            }),
+            ref_span: Some(ByteSpan { start, end: start + 2 }),
             rewrite_supported: true,
             rewrite_reason: None,
         };

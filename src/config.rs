@@ -132,10 +132,7 @@ impl Settings {
         let mut include = if let Some(include) = file_config.scan.include {
             include
         } else {
-            DEFAULT_INCLUDES
-                .iter()
-                .map(|value| value.to_string())
-                .collect()
+            DEFAULT_INCLUDES.iter().map(|value| value.to_string()).collect()
         };
         include.extend(cli.include.iter().cloned());
 
@@ -257,10 +254,9 @@ fn load_config(explicit: Option<&Path>) -> Result<FileConfig> {
         return Ok(FileConfig::default());
     };
 
-    let content = std::fs::read_to_string(&path)
-        .with_context(|| format!("failed to read config file {}", path.display()))?;
-    toml::from_str(&content)
-        .with_context(|| format!("failed to parse config file {}", path.display()))
+    let content =
+        std::fs::read_to_string(&path).with_context(|| format!("failed to read config file {}", path.display()))?;
+    toml::from_str(&content).with_context(|| format!("failed to parse config file {}", path.display()))
 }
 
 fn discover_config() -> Option<PathBuf> {
@@ -289,13 +285,9 @@ pub fn parse_ttl(value: &str) -> Result<CacheTtl> {
         return Ok(CacheTtl::Never);
     }
 
-    let split_at = trimmed
-        .find(|ch: char| !ch.is_ascii_digit())
-        .unwrap_or(trimmed.len());
+    let split_at = trimmed.find(|ch: char| !ch.is_ascii_digit()).unwrap_or(trimmed.len());
     let (number, unit) = trimmed.split_at(split_at);
-    let amount: u64 = number
-        .parse()
-        .with_context(|| format!("invalid cache ttl: {value}"))?;
+    let amount: u64 = number.parse().with_context(|| format!("invalid cache ttl: {value}"))?;
     let multiplier = match unit {
         "" | "s" => 1,
         "m" => 60,
@@ -343,11 +335,7 @@ mod tests {
             "never",
         ]);
         let settings = Settings::resolve(&cli).unwrap();
-        assert!(
-            settings
-                .include
-                .contains(&".github/workflows/*.yml".to_string())
-        );
+        assert!(settings.include.contains(&".github/workflows/*.yml".to_string()));
         assert_eq!(settings.exclude, vec!["**/skip.yml"]);
         assert!(settings.recursive);
         assert_eq!(settings.threads, Some(2));
@@ -400,13 +388,7 @@ pin_style = "major"
         )
         .unwrap();
 
-        let cli = Cli::parse_from([
-            "gau",
-            "--config",
-            config.to_str().unwrap(),
-            "--pin-style",
-            "full",
-        ]);
+        let cli = Cli::parse_from(["gau", "--config", config.to_str().unwrap(), "--pin-style", "full"]);
         let settings = Settings::resolve(&cli).unwrap();
         assert_eq!(settings.pin_style, PinStyle::Full);
     }
@@ -417,11 +399,7 @@ pin_style = "major"
 
         let error = Settings::resolve(&cli).unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("--latest-hash cannot be combined")
-        );
+        assert!(error.to_string().contains("--latest-hash cannot be combined"));
     }
 
     #[test]
@@ -437,13 +415,7 @@ exclude = ["vendor/**"]
         )
         .unwrap();
 
-        let cli = Cli::parse_from([
-            "gau",
-            "--config",
-            config.to_str().unwrap(),
-            "--exclude",
-            "generated/**",
-        ]);
+        let cli = Cli::parse_from(["gau", "--config", config.to_str().unwrap(), "--exclude", "generated/**"]);
         let settings = Settings::resolve(&cli).unwrap();
         assert_eq!(settings.exclude, vec!["vendor/**", "generated/**"]);
     }

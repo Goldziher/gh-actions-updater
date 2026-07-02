@@ -32,12 +32,7 @@ pub fn discover_files(settings: &Settings) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-fn discover_root(
-    root: &Path,
-    include: &GlobSet,
-    exclude: &GlobSet,
-    recursive: bool,
-) -> Result<Vec<PathBuf>> {
+fn discover_root(root: &Path, include: &GlobSet, exclude: &GlobSet, recursive: bool) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     if root.is_file() {
         push_explicit_file(&mut files, root, exclude);
@@ -45,9 +40,7 @@ fn discover_root(
     }
 
     if !root.exists() && has_glob_meta(root) {
-        for entry in glob(&root.to_string_lossy())
-            .with_context(|| format!("invalid glob {}", root.display()))?
-        {
+        for entry in glob(&root.to_string_lossy()).with_context(|| format!("invalid glob {}", root.display()))? {
             let path = entry.with_context(|| format!("failed to read glob {}", root.display()))?;
             if path.is_file() {
                 push_explicit_file(&mut files, &path, exclude);
@@ -68,26 +61,14 @@ fn discover_root(
         .git_exclude(true)
         .require_git(false);
     if !parent_ignores.is_empty() {
-        builder.filter_entry(move |entry| {
-            !is_ignored_by_parent(entry, &root_for_matching, &parent_ignores)
-        });
+        builder.filter_entry(move |entry| !is_ignored_by_parent(entry, &root_for_matching, &parent_ignores));
     }
     let walker = builder.build();
 
     for entry in walker {
         let entry = entry.with_context(|| format!("failed to walk {}", root.display()))?;
-        if entry
-            .file_type()
-            .is_some_and(|file_type| file_type.is_file())
-        {
-            push_if_match(
-                &mut files,
-                entry.path(),
-                &match_base,
-                include,
-                exclude,
-                recursive,
-            );
+        if entry.file_type().is_some_and(|file_type| file_type.is_file()) {
+            push_if_match(&mut files, entry.path(), &match_base, include, exclude, recursive);
         }
     }
     Ok(files)
@@ -113,8 +94,7 @@ fn push_if_match(
     if is_candidate_file(path)
         && (include.is_match(&root_relative)
             || (recursive
-                && (matches_glob_or_suffix(include, &root_relative)
-                    || matches_glob_or_suffix(include, &normalized))))
+                && (matches_glob_or_suffix(include, &root_relative) || matches_glob_or_suffix(include, &normalized))))
         && !exclude.is_match(&root_relative)
         && !matches_glob_or_suffix(exclude, &normalized)
     {
@@ -158,9 +138,7 @@ fn is_candidate_file(path: &Path) -> bool {
 }
 
 fn has_glob_meta(path: &Path) -> bool {
-    path.to_string_lossy()
-        .chars()
-        .any(|ch| matches!(ch, '*' | '?' | '['))
+    path.to_string_lossy().chars().any(|ch| matches!(ch, '*' | '?' | '['))
 }
 
 fn matches_glob_or_suffix(globset: &GlobSet, normalized: &str) -> bool {
@@ -221,9 +199,7 @@ fn is_ignored_by_parent(entry: &DirEntry, root: &Path, parent_ignores: &[ParentI
         return false;
     }
 
-    let is_dir = entry
-        .file_type()
-        .is_some_and(|file_type| file_type.is_dir());
+    let is_dir = entry.file_type().is_some_and(|file_type| file_type.is_dir());
     for parent_ignore in parent_ignores {
         match parent_ignore.matcher.matched(&path, is_dir) {
             Match::Ignore(glob) if !parent_ignore.root_ignore_globs.contains(glob.original()) => {
@@ -259,10 +235,7 @@ mod tests {
     fn settings(root: &Path) -> Settings {
         Settings {
             paths: vec![root.display().to_string()],
-            include: DEFAULT_INCLUDES
-                .iter()
-                .map(|value| value.to_string())
-                .collect(),
+            include: DEFAULT_INCLUDES.iter().map(|value| value.to_string()).collect(),
             exclude: Vec::new(),
             cache_dir: root.join(".cache"),
             cache_ttl: CacheTtl::Seconds(0),
@@ -345,10 +318,7 @@ mod tests {
         let mut settings = settings(temp.path());
         settings.paths = vec![
             temp.path().display().to_string(),
-            temp.path()
-                .join(".github/workflows/*.yml")
-                .display()
-                .to_string(),
+            temp.path().join(".github/workflows/*.yml").display().to_string(),
         ];
         settings.exclude = vec![".github/workflows/b.yml".to_string()];
 
@@ -360,9 +330,7 @@ mod tests {
     fn recursive_directory_scan_skips_ignored_nested_repo_actions_surface() {
         let temp = tempfile::tempdir().unwrap();
         let workflow = temp.path().join("nested-repo/.github/workflows/ci.yml");
-        let action = temp
-            .path()
-            .join("nested-repo/.github/actions/build/action.yml");
+        let action = temp.path().join("nested-repo/.github/actions/build/action.yml");
         fs::create_dir_all(workflow.parent().unwrap()).unwrap();
         fs::create_dir_all(action.parent().unwrap()).unwrap();
         fs::write(&workflow, "name: ci").unwrap();
@@ -418,9 +386,7 @@ mod tests {
     fn default_directory_scan_does_not_recurse_into_nested_dot_github() {
         let temp = tempfile::tempdir().unwrap();
         let root_workflow = temp.path().join(".github/workflows/root.yml");
-        let nested_workflow = temp
-            .path()
-            .join("vendor/project/.github/workflows/nested.yml");
+        let nested_workflow = temp.path().join("vendor/project/.github/workflows/nested.yml");
         fs::create_dir_all(root_workflow.parent().unwrap()).unwrap();
         fs::create_dir_all(nested_workflow.parent().unwrap()).unwrap();
         fs::write(&root_workflow, "name: root").unwrap();
@@ -434,9 +400,7 @@ mod tests {
     fn recursive_directory_scan_includes_nested_dot_github() {
         let temp = tempfile::tempdir().unwrap();
         let root_workflow = temp.path().join(".github/workflows/root.yml");
-        let nested_workflow = temp
-            .path()
-            .join("tools/project/.github/workflows/nested.yml");
+        let nested_workflow = temp.path().join("tools/project/.github/workflows/nested.yml");
         fs::create_dir_all(root_workflow.parent().unwrap()).unwrap();
         fs::create_dir_all(nested_workflow.parent().unwrap()).unwrap();
         fs::write(&root_workflow, "name: root").unwrap();
@@ -453,8 +417,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let root_workflow = temp.path().join(".github/workflows/root.yml");
         let ignored_workflows = [
-            temp.path()
-                .join("node_modules/pkg/.github/workflows/ci.yml"),
+            temp.path().join("node_modules/pkg/.github/workflows/ci.yml"),
             temp.path().join("vendor/pkg/.github/workflows/ci.yml"),
             temp.path()
                 .join("packages/ruby/vendor/bundle/pkg/.github/workflows/ci.yml"),

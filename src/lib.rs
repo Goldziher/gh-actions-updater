@@ -25,8 +25,7 @@ pub fn run() -> Result<()> {
         return Ok(());
     }
 
-    let settings = match config::Settings::resolve(&cli).context("failed to resolve configuration")
-    {
+    let settings = match config::Settings::resolve(&cli).context("failed to resolve configuration") {
         Ok(settings) => settings,
         Err(error) => {
             eprintln!("{error:#}");
@@ -34,10 +33,7 @@ pub fn run() -> Result<()> {
         }
     };
     if let Some(threads) = settings.threads {
-        if let Err(error) = rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .build_global()
-        {
+        if let Err(error) = rayon::ThreadPoolBuilder::new().num_threads(threads).build_global() {
             eprintln!("failed to configure rayon thread pool: {error}");
             std::process::exit(2);
         }
@@ -96,9 +92,7 @@ pub fn run() -> Result<()> {
     }
     let exit_code = metadata::exit_code_for_resolution(&settings, &resolution);
     let rewrite_result = if settings.update || settings.diff {
-        match rewrite::apply_updates(&settings, &resolution.updates)
-            .context("failed to apply updates")
-        {
+        match rewrite::apply_updates(&settings, &resolution.updates).context("failed to apply updates") {
             Ok(result) => result,
             Err(error) => {
                 eprintln!("{error:#}");
@@ -109,13 +103,7 @@ pub fn run() -> Result<()> {
         rewrite::RewriteResult::default()
     };
 
-    let mut report = RunReport::from_scan(
-        env!("CARGO_PKG_VERSION"),
-        &settings,
-        resolution,
-        files,
-        scan,
-    );
+    let mut report = RunReport::from_scan(env!("CARGO_PKG_VERSION"), &settings, resolution, files, scan);
     report.set_rewrite_result(rewrite_result);
     report.write(&mut io::stdout(), &mut io::stderr())?;
 

@@ -44,18 +44,11 @@ pub fn run(cli: &Cli) -> Result<()> {
         .clone()
         .unwrap_or_else(|| PathBuf::from(".gh-actions-updater.toml"));
     if path.exists() && !cli.force {
-        anyhow::bail!(
-            "{} already exists; pass --force to overwrite it",
-            path.display()
-        );
+        anyhow::bail!("{} already exists; pass --force to overwrite it", path.display());
     }
 
-    if let Some(parent) = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
+    if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
     }
 
     let mut config = DEFAULT_CONFIG.to_string();

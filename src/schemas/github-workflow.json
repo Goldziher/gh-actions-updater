@@ -1106,19 +1106,9 @@
                   "$ref": "#/definitions/types",
                   "items": {
                     "type": "string",
-                    "enum": [
-                      "created",
-                      "rerequested",
-                      "completed",
-                      "requested_action"
-                    ]
+                    "enum": ["created", "rerequested", "completed", "requested_action"]
                   },
-                  "default": [
-                    "created",
-                    "rerequested",
-                    "completed",
-                    "requested_action"
-                  ]
+                  "default": ["created", "rerequested", "completed", "requested_action"]
                 }
               }
             },
@@ -1330,13 +1320,7 @@
                     "type": "string",
                     "enum": ["created", "closed", "opened", "edited", "deleted"]
                   },
-                  "default": [
-                    "created",
-                    "closed",
-                    "opened",
-                    "edited",
-                    "deleted"
-                  ]
+                  "default": ["created", "closed", "opened", "edited", "deleted"]
                 }
               }
             },
@@ -1354,23 +1338,9 @@
                   "$ref": "#/definitions/types",
                   "items": {
                     "type": "string",
-                    "enum": [
-                      "created",
-                      "updated",
-                      "closed",
-                      "reopened",
-                      "edited",
-                      "deleted"
-                    ]
+                    "enum": ["created", "updated", "closed", "reopened", "edited", "deleted"]
                   },
-                  "default": [
-                    "created",
-                    "updated",
-                    "closed",
-                    "reopened",
-                    "edited",
-                    "deleted"
-                  ]
+                  "default": ["created", "updated", "closed", "reopened", "edited", "deleted"]
                 }
               }
             },
@@ -1383,21 +1353,9 @@
                   "$ref": "#/definitions/types",
                   "items": {
                     "type": "string",
-                    "enum": [
-                      "created",
-                      "moved",
-                      "converted",
-                      "edited",
-                      "deleted"
-                    ]
+                    "enum": ["created", "moved", "converted", "edited", "deleted"]
                   },
-                  "default": [
-                    "created",
-                    "moved",
-                    "converted",
-                    "edited",
-                    "deleted"
-                  ]
+                  "default": ["created", "moved", "converted", "edited", "deleted"]
                 }
               }
             },
@@ -1681,25 +1639,9 @@
                   "$ref": "#/definitions/types",
                   "items": {
                     "type": "string",
-                    "enum": [
-                      "published",
-                      "unpublished",
-                      "created",
-                      "edited",
-                      "deleted",
-                      "prereleased",
-                      "released"
-                    ]
+                    "enum": ["published", "unpublished", "created", "edited", "deleted", "prereleased", "released"]
                   },
-                  "default": [
-                    "published",
-                    "unpublished",
-                    "created",
-                    "edited",
-                    "deleted",
-                    "prereleased",
-                    "released"
-                  ]
+                  "default": ["published", "unpublished", "created", "edited", "deleted", "prereleased", "released"]
                 }
               }
             },

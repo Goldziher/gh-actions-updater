@@ -27,12 +27,8 @@ pub struct CacheState {
 impl CacheState {
     pub fn prepare(settings: &Settings) -> Result<Self> {
         if settings.cache_enabled {
-            fs::create_dir_all(&settings.cache_dir).with_context(|| {
-                format!(
-                    "failed to create cache directory {}",
-                    settings.cache_dir.display()
-                )
-            })?;
+            fs::create_dir_all(&settings.cache_dir)
+                .with_context(|| format!("failed to create cache directory {}", settings.cache_dir.display()))?;
         }
 
         let _ = match settings.cache_ttl {
@@ -97,15 +93,12 @@ impl CacheState {
             fetched_at: unix_now(),
             value,
         };
-        let temp_path = self.dir.join(format!(
-            "{key}.{}.{}.json.tmp",
-            std::process::id(),
-            unix_now()
-        ));
+        let temp_path = self
+            .dir
+            .join(format!("{key}.{}.{}.json.tmp", std::process::id(), unix_now()));
         fs::write(&temp_path, serde_json::to_vec(&entry)?)
             .with_context(|| format!("failed to write cache entry {}", temp_path.display()))?;
-        fs::rename(&temp_path, &path)
-            .with_context(|| format!("failed to write cache entry {}", path.display()))?;
+        fs::rename(&temp_path, &path).with_context(|| format!("failed to write cache entry {}", path.display()))?;
         self.report.refreshes += 1;
         Ok(())
     }
