@@ -19,5 +19,5 @@ Run static quality checks.
    - `node --check npm-package/bin/gau`
    - `python3 -m compileall pip-package/gh_actions_updater`
 4. Run `goreleaser check` if `.goreleaser.yaml` changed.
-5. Run `prek run actionlint --all-files` if GitHub workflows changed.
+5. Run `poly lint .` if GitHub workflows changed.
 6. Report failures by severity and include exact commands to rerun.

@@ -4,7 +4,7 @@ priority: high
 
 # Configuration System
 
-Configuration must support zero-config local use, pre-commit hooks, and
+Configuration must support zero-config local use, commit-step hooks, and
 workspace-wide recursive audits.
 
 ## Files And Precedence

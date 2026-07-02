@@ -4,7 +4,7 @@ priority: critical
 
 # Metadata, Cache, And Performance
 
-`gau` is intended for pre-commit and workspace-wide dry runs. It must be fast by
+`gau` is intended for the commit step and workspace-wide dry runs. It must be fast by
 default and careful with network access.
 
 ## Metadata Fetching

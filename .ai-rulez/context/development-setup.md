@@ -50,7 +50,7 @@ python3 -m build pip-package --outdir /tmp/ghau-pip-dist
 
 ```bash
 goreleaser check
-prek run actionlint --all-files
+poly lint .
 ```
 
 When adding dependencies, run:
