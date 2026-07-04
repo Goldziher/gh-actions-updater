@@ -1,6 +1,12 @@
 version: "3"
 
 tasks:
+  setup:
+    desc: "Fetch dependencies and install git hooks"
+    cmds:
+      - cargo fetch
+      - poly hooks install
+
   set-version:
     desc: "Set version across packages and docs (usage: task set-version -- 1.2.3)"
     requires:
