@@ -78,10 +78,5 @@ cargo = true
 [tools.actionlint]
 enabled = true
 
-# --- lightweight inline script hooks (no toolchain) ---
-[hooks.pre-commit.scripts.ai_rulez_generate]
-# TODO: wire to vendored script / task target (was a shared pre-commit-hooks hook).
-run = "TODO-ai-rulez-generate"
-
 # --- dropped / unmapped hooks (for the record) ---
 # UNMAPPED: cargo-check
