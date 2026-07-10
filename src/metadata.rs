@@ -375,10 +375,6 @@ pub fn resolve_updates_with_provider(
         let excluded =
             reference.update_ignored || is_update_excluded(&update_exclude, reference.raw.as_str(), owner, repo);
 
-        // Compute the update path this reference would take if not excluded.
-        // SHA refs always trigger metadata: with --latest-hash they're update
-        // candidates, otherwise they get an advisory diagnostic with the
-        // current pin's tag and any newer same-major SHA.
         let semver_update = matches!(reference.parsed.ref_kind, RefKind::SemverLikeTag);
         let sha_update = settings.latest_hash && reference.parsed.ref_kind == RefKind::Sha;
         let sha_advisory = !settings.latest_hash && reference.parsed.ref_kind == RefKind::Sha;
@@ -387,7 +383,6 @@ pub fn resolve_updates_with_provider(
             RefKind::BranchOrUnknown | RefKind::Branch | RefKind::NonSemverTag
         ) && (settings.validate || settings.pin_floating_to_sha);
 
-        // Tags are needed for any path that consults the upstream tag list.
         let needs_tags =
             (!excluded && (semver_update || sha_update || sha_advisory || needs_classification)) || settings.validate;
 
@@ -413,9 +408,6 @@ pub fn resolve_updates_with_provider(
             }
             let tags = &tag_load.tags;
 
-            // Classify BranchOrUnknown refs by checking upstream — only when
-            // --validate or --pin-floating-to-sha is on. We avoid extra API
-            // calls in the default scan.
             if needs_classification {
                 if effective_ref_kind == RefKind::BranchOrUnknown {
                     if let Some(tag) = tags.iter().find(|tag| tag.name == current) {
@@ -449,7 +441,6 @@ pub fn resolve_updates_with_provider(
                 }
             }
 
-            // --validate: verify the ref exists upstream.
             if settings.validate {
                 let exists_upstream = match effective_ref_kind {
                     RefKind::SemverLikeTag | RefKind::NonSemverTag => tags.iter().any(|tag| tag.name == current),
@@ -477,8 +468,6 @@ pub fn resolve_updates_with_provider(
                 matches!(effective_ref_kind, RefKind::SemverLikeTag | RefKind::Sha)
             };
 
-        // SHA refs without --latest-hash: emit an advisory diagnostic when a
-        // newer same-major tag exists, but do not create an update.
         let sha_advisory = !settings.latest_hash && !settings.pin_floating_to_sha && effective_ref_kind == RefKind::Sha;
 
         let semver_update = !settings.pin_floating_to_sha

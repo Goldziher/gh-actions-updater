@@ -2,15 +2,7 @@
 set -euo pipefail
 
 # update-homebrew-formula.sh <version> <checksums-file>
-#
-# Emits a Homebrew formula (to stdout) for the PREBUILT gau binary, pulling
-# the per-platform archive URLs from the GitHub release and the sha256 digests
-# from the release checksums file (`checksums.txt`). This replaces goreleaser's
-# `brews:` generator. Run only for stable releases.
-#
 # The archives contain `gau` + README.md + LICENSE + .pre-commit-hooks.yaml
-# at the root; the formula extracts the binary into bin/ and the metadata
-# into libexec/ for reference.
 
 if [ $# -ne 2 ]; then
   echo "Usage: $0 <version> <checksums-file>" >&2
@@ -25,13 +17,11 @@ sha_for() {
   awk -v f="gh-actions-updater-$1.tar.gz" '{n=$NF; sub(/^[*]/, "", n); if (n == f) print $1}' "$SUMS"
 }
 
-# Extract sha256 for each supported platform
 MAC_ARM=$(sha_for aarch64-apple-darwin)
 MAC_X64=$(sha_for x86_64-apple-darwin)
 LINUX_ARM=$(sha_for aarch64-unknown-linux-gnu)
 LINUX_X64=$(sha_for x86_64-unknown-linux-gnu)
 
-# Verify all 4 required checksums are present
 for pair in "aarch64-apple-darwin:$MAC_ARM" \
   "x86_64-apple-darwin:$MAC_X64" \
   "aarch64-unknown-linux-gnu:$LINUX_ARM" \

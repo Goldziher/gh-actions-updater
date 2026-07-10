@@ -207,8 +207,6 @@ fn scan_content(path: &Path, kind: FileKind, content: &str) -> Result<Vec<Refere
     for value in values {
         let raw = value.raw;
         let parsed = parse_uses(&raw);
-        // Try to find the ref span in the source. First attempt: use the value span we found.
-        // Second attempt: if that failed, try to find the @ symbol directly in the content.
         let ref_span = value
             .value_span
             .and_then(|span| find_ref_span(&raw, span.start))
@@ -333,10 +331,6 @@ fn mapping_get_pair_marked<'a>(
 }
 
 fn find_value_span(value: &MarkedYaml<'_>, content: &str, raw: &str) -> Option<ByteSpan> {
-    // saphyr's `Marker::index()` is a *char* index into the source, but every
-    // downstream consumer slices `content` by byte offset. Convert here so a
-    // multibyte character (e.g. an em-dash in a description) earlier in the file
-    // does not shift the span and break the rewrite.
     let start_char = value.span.start.index();
     let end_char = value.span.end.index();
     if raw.is_empty() || start_char >= end_char {
@@ -353,28 +347,20 @@ fn char_index_to_byte_offset(content: &str, char_index: usize) -> Option<usize> 
     let mut indices = content.char_indices();
     match indices.nth(char_index) {
         Some((byte_offset, _)) => Some(byte_offset),
-        // A char index pointing one past the final character maps to the end of
-        // the string; anything beyond that is out of range.
         None if char_index == content.chars().count() => Some(content.len()),
         None => None,
     }
 }
 
 fn find_ref_span_fallback(content: &str, _raw: &str, parser_span: Option<ByteSpan>) -> Option<ByteSpan> {
-    // If we have a parser span, try to find the @ symbol within that region.
-    // This is a fallback for when find_value_span_in_source fails (e.g., due to
-    // whitespace normalization or other parser-specific quirks).
     if let Some(span) = parser_span {
         if span.end > content.len() || !content.is_char_boundary(span.start) || !content.is_char_boundary(span.end) {
             return None;
         }
         let region = &content[span.start..span.end];
-        // Look for the @ symbol in the region
         if let Some(at_offset) = region.find('@') {
-            // Verify that what comes after @ looks like a ref (no spaces, reasonable length)
             let after_at = &region[at_offset + 1..];
             if !after_at.is_empty() && !after_at.starts_with(' ') && !after_at.starts_with('\t') {
-                // Calculate the ref span as everything from @ to the end of the region
                 let ref_start = span.start + at_offset;
                 let ref_end = span.end;
                 return Some(ByteSpan {
@@ -581,9 +567,6 @@ jobs:
 
     #[test]
     fn rewrite_span_survives_multibyte_chars_before_value() {
-        // An em-dash and box-drawing characters earlier in the file shift byte
-        // offsets relative to the parser's char indices. The span must still
-        // land exactly on the ref so the rewrite stays supported.
         let content = "\
 jobs:
   test:
