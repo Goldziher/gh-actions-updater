@@ -32,6 +32,15 @@ Expected targets:
 
 Homebrew bottles are produced by the `Goldziher/homebrew-tap` bottle workflow.
 
+## Integrations
+
+- The composite GitHub Action exposes bounded `check` and `update` operations.
+- The Action installer verifies release archives against `checksums.txt`.
+- pre-commit and Poly publish `gh-actions-updater-check` and
+  `gh-actions-updater-update`; the legacy pre-commit id aliases update.
+- Stable releases move `v0` only after every required archive and checksum is
+  present and the release is published.
+
 ## Wrapper Rules
 
 - npm `bin` exposes `gau`.

@@ -18,6 +18,7 @@ pub struct RunReport {
     pub references: Vec<ReferenceReport>,
     pub updates: Vec<UpdateReport>,
     pub diagnostics: Vec<Diagnostic>,
+    pub skips: Vec<SkipReport>,
     pub cache: CacheReport,
     pub diffs: Vec<String>,
 
@@ -38,6 +39,15 @@ pub struct Summary {
     pub files_scanned: usize,
     pub references_found: usize,
     pub updates_available: usize,
+    pub skipped: usize,
+    pub failures: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkipReport {
+    pub file: String,
+    pub line: usize,
+    pub code: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -87,6 +97,39 @@ impl RunReport {
             ColorChoice::Auto => std::io::stderr().is_terminal(),
         };
         let would_change = !resolution.updates.is_empty();
+        let mut skips: Vec<_> = scan
+            .references
+            .iter()
+            .filter_map(|reference| {
+                skip_code(reference, settings).map(|code| SkipReport {
+                    file: reference.file.clone(),
+                    line: reference.line,
+                    code,
+                })
+            })
+            .collect();
+        skips.extend(
+            resolution
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == crate::scanner::DiagnosticCode::MetadataLookupFailed)
+                .map(|diagnostic| SkipReport {
+                    file: diagnostic.file.clone(),
+                    line: diagnostic.line.unwrap_or_default(),
+                    code: "metadata_lookup_failed",
+                }),
+        );
+        let failures = scan
+            .diagnostics
+            .iter()
+            .chain(resolution.diagnostics.iter())
+            .filter(|diagnostic| {
+                matches!(
+                    diagnostic.category,
+                    crate::scanner::DiagnosticCategory::Validation | crate::scanner::DiagnosticCategory::Metadata
+                )
+            })
+            .count();
         Self {
             version: version.to_string(),
             changed: false,
@@ -95,6 +138,8 @@ impl RunReport {
                 files_scanned: scan.files.len(),
                 references_found,
                 updates_available: resolution.updates.len(),
+                skipped: skips.len(),
+                failures,
             },
             files: scan.files,
             references: scan.references,
@@ -104,6 +149,7 @@ impl RunReport {
                 diagnostics.extend(resolution.diagnostics);
                 diagnostics
             },
+            skips,
             cache: resolution.cache,
             diffs: Vec::new(),
             format: settings.format,
@@ -265,6 +311,46 @@ impl RunReport {
         };
         format!("\x1b[{code}m{value}\x1b[0m")
     }
+}
+
+fn skip_code(reference: &ReferenceReport, settings: &Settings) -> Option<&'static str> {
+    if reference.update_ignored {
+        return Some("inline_ignore");
+    }
+    let repository = match (reference.parsed.owner.as_deref(), reference.parsed.repo.as_deref()) {
+        (Some(owner), Some(repo)) => Some(format!("{owner}/{repo}")),
+        _ => None,
+    };
+    if settings.update_exclude.iter().any(|pattern| {
+        glob::Pattern::new(pattern).is_ok_and(|pattern| {
+            pattern.matches(&reference.raw)
+                || repository
+                    .as_deref()
+                    .is_some_and(|repository| pattern.matches(repository))
+        })
+    }) {
+        return Some("update_excluded");
+    }
+    match reference.parsed.kind {
+        crate::action_ref::ReferenceKind::LocalAction | crate::action_ref::ReferenceKind::LocalWorkflow => {
+            return Some("local_reference");
+        }
+        crate::action_ref::ReferenceKind::DockerImage => return Some("docker_reference"),
+        _ => {}
+    }
+    if !reference.rewrite_supported && reference.parsed.ref_name.is_some() {
+        return Some("rewrite_unsafe");
+    }
+    if matches!(
+        reference.parsed.ref_kind,
+        crate::action_ref::RefKind::Branch
+            | crate::action_ref::RefKind::BranchOrUnknown
+            | crate::action_ref::RefKind::NonSemverTag
+    ) && !settings.pin_floating_to_sha
+    {
+        return Some("floating_ref_requires_opt_in");
+    }
+    None
 }
 
 #[derive(Clone, Copy)]

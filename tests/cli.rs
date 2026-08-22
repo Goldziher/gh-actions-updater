@@ -203,3 +203,113 @@ jobs:
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("\x1b["));
 }
+
+#[test]
+fn check_validate_fails_for_missing_local_reference() {
+    let temp = tempfile::tempdir().unwrap();
+    let workflow = temp.path().join(".github/workflows/ci.yml");
+    fs::create_dir_all(workflow.parent().unwrap()).unwrap();
+    fs::write(
+        workflow,
+        "jobs:\n  test:\n    steps:\n      - uses: ./.github/actions/missing\n",
+    )
+    .unwrap();
+
+    let output = Command::new(binary())
+        .args([
+            "--check",
+            "--validate",
+            "--format",
+            "json",
+            "--no-cache",
+            "--no-schema-validation",
+        ])
+        .arg(temp.path())
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["diagnostics"][0]["code"], "local_reference_missing");
+}
+
+#[test]
+fn check_validate_fails_for_local_action_directory_without_metadata() {
+    let temp = tempfile::tempdir().unwrap();
+    let workflow = temp.path().join(".github/workflows/ci.yml");
+    let empty_action = temp.path().join(".github/actions/empty");
+    fs::create_dir_all(workflow.parent().unwrap()).unwrap();
+    fs::create_dir_all(empty_action).unwrap();
+    fs::write(
+        workflow,
+        "jobs:\n  test:\n    steps:\n      - uses: ./.github/actions/empty\n",
+    )
+    .unwrap();
+
+    let output = Command::new(binary())
+        .args([
+            "--check",
+            "--validate",
+            "--format",
+            "json",
+            "--no-cache",
+            "--no-schema-validation",
+        ])
+        .arg(temp.path())
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["diagnostics"][0]["code"], "local_reference_missing");
+}
+
+#[test]
+fn json_reports_stable_skip_codes_without_counting_valid_local_or_docker_as_failures() {
+    let temp = tempfile::tempdir().unwrap();
+    let workflow = temp.path().join(".github/workflows/ci.yml");
+    let local_action = temp.path().join(".github/actions/local/action.yml");
+    let config = temp.path().join("config.toml");
+    fs::create_dir_all(workflow.parent().unwrap()).unwrap();
+    fs::create_dir_all(local_action.parent().unwrap()).unwrap();
+    fs::write(local_action, "name: local\nruns:\n  using: composite\n  steps: []\n").unwrap();
+    fs::write(
+        workflow,
+        concat!(
+            "jobs:\n  test:\n    steps:\n",
+            "      - uses: actions/checkout@main # gau: ignore\n",
+            "      - uses: owner/excluded@main\n",
+            "      - uses: ./.github/actions/local\n",
+            "      - uses: docker://alpine:3\n",
+        ),
+    )
+    .unwrap();
+    fs::write(&config, "[update]\nexclude = [\"owner/excluded\"]\n").unwrap();
+
+    let output = Command::new(binary())
+        .args([
+            "--config",
+            config.to_str().unwrap(),
+            "--format",
+            "json",
+            "--no-cache",
+            "--no-schema-validation",
+        ])
+        .arg(temp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let codes: Vec<_> = report["skips"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|skip| skip["code"].as_str().unwrap())
+        .collect();
+    assert!(codes.contains(&"inline_ignore"));
+    assert!(codes.contains(&"update_excluded"));
+    assert!(codes.contains(&"local_reference"));
+    assert!(codes.contains(&"docker_reference"));
+    assert_eq!(report["summary"]["failures"], 0);
+}

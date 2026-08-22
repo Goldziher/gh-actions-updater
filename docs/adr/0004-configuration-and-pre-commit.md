@@ -34,15 +34,16 @@ Initial config sections:
 
 Presentation flags `quiet`, `verbose`, and `diff` are CLI-only for v0.1.1.
 
-The user-facing pre-commit hook will be published in `.pre-commit-hooks.yaml`
-with hook id `gh-actions-updater`. The default hook args are check-only and do
-not rewrite files. Users may opt into mutation by passing `--update`.
+The user-facing pre-commit and Poly catalogs publish explicit check and update
+operations. Check is the non-mutating validation gate; update rewrites files.
+The legacy pre-commit id `gh-actions-updater` remains an update alias.
 
 The hook contract is:
 
-- `id: gh-actions-updater`
-- `name: gh-actions-updater`
-- `entry: gau --check`
+- `id: gh-actions-updater-check`
+- `entry: gau --latest --check --validate --missing-ref error`
+- `id: gh-actions-updater-update`
+- `entry: gau --latest --update --validate --missing-ref error`
 - `language: rust`
 - `pass_filenames: false`
 - `stages: [pre-commit]`
@@ -52,5 +53,5 @@ lookups are enabled only when users opt into `--latest-hash`.
 
 ## Consequences
 
-Config behavior is deterministic, and pre-commit users get a safe default that
-does not rewrite workflow files during commit unless they ask for it.
+Config behavior is deterministic, and integrations distinguish validation gates
+from explicitly mutating update hooks.

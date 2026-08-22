@@ -69,6 +69,7 @@ pub fn run() -> Result<()> {
                 diagnostics: Vec::new(),
                 cache: cache.report.clone(),
                 resolved_ref_kinds: Vec::new(),
+                has_metadata_failures: false,
             },
             files,
             scan,
@@ -91,6 +92,7 @@ pub fn run() -> Result<()> {
         }
     }
     let exit_code = metadata::exit_code_for_resolution(&settings, &resolution);
+    let has_metadata_failures = resolution.has_metadata_failures;
     let rewrite_result = if settings.update || settings.diff {
         match rewrite::apply_updates(&settings, &resolution.updates).context("failed to apply updates") {
             Ok(result) => result,
@@ -109,6 +111,10 @@ pub fn run() -> Result<()> {
 
     if has_scan_failures {
         std::process::exit(3);
+    }
+
+    if has_metadata_failures {
+        std::process::exit(4);
     }
 
     if let Some(exit_code) = exit_code {

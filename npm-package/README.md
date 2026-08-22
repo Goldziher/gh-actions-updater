@@ -20,6 +20,8 @@ Common usage:
 gau --init
 gau --check .
 gau --update --diff .
+gau --latest --check .
+gau --latest-tag --update .
 gau --latest-hash --update .
 gau --pin-style major --update .
 gau -r ~/workspace --check
@@ -39,6 +41,9 @@ gau --init --recursive --force
 
 Useful flags:
 
+- `--latest`: preserve each reference's tag or SHA representation
+- `--latest-tag`: update to compatible semantic-version tags (default)
+- `--latest-hash`: select compatible releases and pin their commit SHAs
 - `--cache-ttl <DURATION>`: `15m`, `6h`, `7d`, `0`, or `never`
 - `--no-cache`: disable cache reads and writes
 - `--refresh-cache`: force fresh metadata

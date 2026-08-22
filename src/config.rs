@@ -25,6 +25,7 @@ pub struct Settings {
     pub cache_enabled: bool,
     pub refresh_cache: bool,
     pub update: bool,
+    pub update_mode: UpdateMode,
     pub latest_hash: bool,
     pub pin_style: PinStyle,
     pub update_exclude: Vec<String>,
@@ -159,7 +160,11 @@ impl Settings {
             .or(file_config.cache.ttl)
             .unwrap_or_else(|| "6h".to_string());
 
-        let update_mode = if cli.latest_hash {
+        let update_mode = if cli.latest {
+            UpdateMode::Latest
+        } else if cli.latest_tag {
+            UpdateMode::LatestTag
+        } else if cli.latest_hash {
             UpdateMode::LatestHash
         } else {
             file_config.update.mode.unwrap_or(UpdateMode::LatestTag)
@@ -169,7 +174,7 @@ impl Settings {
             .pin_style
             .or(file_config.update.pin_style)
             .unwrap_or(PinStyle::Preserve);
-        if latest_hash && pin_style != PinStyle::Preserve {
+        if latest_hash && cli.pin_style.is_some() && pin_style != PinStyle::Preserve {
             anyhow::bail!("--latest-hash cannot be combined with --pin-style {pin_style:?}");
         }
 
@@ -218,6 +223,7 @@ impl Settings {
             cache_enabled,
             refresh_cache: cli.refresh_cache,
             update: cli.update,
+            update_mode,
             latest_hash,
             pin_style,
             update_exclude: file_config.update.exclude.unwrap_or_default(),

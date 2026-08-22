@@ -369,6 +369,21 @@ jobs:
           gh release edit "$tag" --draft=false --repo "$GITHUB_REPOSITORY"
           echo "✓ Promoted $tag to a published release"
 
+      - name: Move stable major tag
+        if: ${{ !contains(needs.meta.outputs.tag, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.meta.outputs.tag }}"
+          sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" --jq '.object.sha')"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v0" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/v0" -f sha="$sha" -F force=true >/dev/null
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" -f ref='refs/tags/v0' -f sha="$sha" >/dev/null
+          fi
+          echo "Moved v0 to $tag ($sha)"
+
   publish_crates:
     name: Publish crates.io
     needs: meta

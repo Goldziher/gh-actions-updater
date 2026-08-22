@@ -25,6 +25,8 @@ Distribution targets:
 - Homebrew formula plus bottles in `Goldziher/homebrew-tap`
 - npm wrapper package `gh-actions-updater`
 - PyPI wrapper package `gh-actions-updater`
+- Composite GitHub Action through stable major tag `v0`
+- pre-commit and Poly producer hook catalogs
 
 Package names stay `gh-actions-updater`; the distributed command installed by
 all package managers is `gau`.
@@ -40,6 +42,8 @@ Release flow requirements:
 - publish crates.io with OIDC trusted publishing
 - publish npm and PyPI with provenance/trusted publishing
 - pin release workflow actions to commit SHAs
+- keep releases as drafts until all five archives and `checksums.txt` exist
+- move `v0` only after a stable release is complete and published
 
 ## Consequences
 

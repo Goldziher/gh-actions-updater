@@ -1,6 +1,6 @@
 # ADR 0001: CLI Surface And Modes
 
-Status: Accepted for v0.1.1 implementation
+Status: Accepted, updated for v0.2.0
 
 ## Context
 
@@ -10,8 +10,7 @@ able to run it without risking workflow rewrites.
 
 ## Decision
 
-The v0.1.1 package name is `gh-actions-updater`; the installed binary is `gau`
-at version `0.1.1`.
+The package name is `gh-actions-updater`; the installed binary is `gau`.
 
 The default invocation scans workflow files and reports action refs. It does not
 write files unless `--update` is provided. `--dry-run` is therefore the default
@@ -29,6 +28,8 @@ Supported flags:
 - `--refresh-cache`
 - `--no-cache`
 - `--update`
+- `--latest`
+- `--latest-tag`
 - `--latest-hash`
 - `--pin-style <preserve|major|minor|full>`
 - `--missing-ref <warn|error|ignore|fallback>`
@@ -58,12 +59,17 @@ Exit codes are stable:
 Successful `--update` exits `0`, including when files were changed. Users who
 need drift detection must use `--check`.
 
+The default selection mode is `latest-tag`. `--latest` preserves the current tag
+or SHA representation, while `--latest-hash` selects a compatible release and
+pins its commit SHA. These three flags are mutually exclusive.
+
 Machine-readable JSON is written to stdout. Logs, warnings, and diagnostics not
 included in the JSON payload are written to stderr. `--diff` prints diff text in
 human output and includes a `diffs` array in JSON output. JSON `changed` means
-files were written; `would_change` covers dry-run/check/diff automation.
+files were written; `would_change` covers dry-run/check/diff automation. JSON
+also includes structured diagnostics, skips, and summary failure/skip counts.
 
 ## Consequences
 
 Automation can rely on a non-mutating default. The CLI has enough surface for
-pre-commit and CI without requiring separate subcommands in v0.1.1.
+pre-commit and CI without requiring separate subcommands.

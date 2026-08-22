@@ -13,6 +13,8 @@ same as rewriting it.
 - Preserve the current major version for semver-like refs.
 - Ignore prereleases unless configured.
 - Reusable workflow refs follow the same tag/hash policy as action refs.
+- `--latest-tag` is the default and selects compatible semantic-version tags.
+- `--latest` preserves each reference's current tag or SHA format.
 - `--latest-hash` first selects the same compatible tag as latest-tag mode,
   then pins to that tag's commit SHA.
 - Never jump to the remote repository default branch as an update target.

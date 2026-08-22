@@ -227,7 +227,7 @@ fn absolutize(path: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::discover_files;
-    use crate::cli::{ColorChoice, MissingRefPolicy, OutputFormat, PinStyle};
+    use crate::cli::{ColorChoice, MissingRefPolicy, OutputFormat, PinStyle, UpdateMode};
     use crate::config::{CacheTtl, DEFAULT_INCLUDES, Settings};
     use std::fs;
     use std::path::Path;
@@ -242,6 +242,7 @@ mod tests {
             cache_enabled: false,
             refresh_cache: false,
             update: false,
+            update_mode: UpdateMode::LatestTag,
             latest_hash: false,
             pin_style: PinStyle::Preserve,
             update_exclude: Vec::new(),

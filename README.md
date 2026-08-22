@@ -40,6 +40,8 @@ gau .
 gau --check .
 gau --update .
 gau --update --diff .
+gau --latest --check .
+gau --latest-tag --update .
 gau --latest-hash --update .
 gau -r ~/workspace --check
 ```
@@ -75,6 +77,8 @@ when you want to scan it anyway.
 | `--refresh-cache` | Ignore existing cache entries and fetch fresh metadata. |
 | `--no-cache` | Disable cache reads and writes. |
 | `--update` | Rewrite supported refs. |
+| `--latest` | Update tags as tags and SHA pins as SHAs. |
+| `--latest-tag` | Update eligible references to compatible tags; this is the default. |
 | `--latest-hash` | Pin update targets to commit SHAs instead of tags. |
 | `--pin-style <preserve\|major\|minor\|full>` | Control semver tag pin formatting. |
 | `--missing-ref <warn\|error\|ignore\|fallback>` | Policy for deleted or missing current refs. |
@@ -152,6 +156,11 @@ Supported environment variables:
 - `GHAU_CACHE_DIR`
 - `GHAU_CACHE_TTL`
 
+For GitHub metadata authentication, `--github-token` takes precedence over
+`GHAU_GITHUB_TOKEN`, `GITHUB_TOKEN`, and `GH_TOKEN`, in that order. A token is
+recommended in CI and for workspace-wide scans to avoid anonymous API rate
+limits.
+
 ## Update Semantics
 
 Supported `uses:` locations:
@@ -161,7 +170,9 @@ Supported `uses:` locations:
 - composite action step actions: `runs.steps[*].uses` when
   `runs.using = "composite"`
 
-Default mode is `latest-tag`. Semver-like refs update within the current major
+Default mode is `latest-tag`. `--latest` preserves the current representation:
+tag pins update to compatible tags and SHA pins update to SHAs. `--latest-hash`
+selects the compatible release and pins its commit SHA. Semver-like refs update within the current major
 version by default. `pin_style = "preserve"` keeps the current precision:
 `@v4` stays a major floating pin, `@v4.1` stays a minor floating pin, and
 `@v4.1.0` updates to full compatible tags. Use `--pin-style major`, `minor`, or
@@ -250,18 +261,21 @@ JSON output includes:
 
 ```json
 {
-  "version": "0.1.7",
+  "version": "0.2.0",
   "changed": false,
   "would_change": false,
   "summary": {
     "files_scanned": 0,
     "references_found": 0,
-    "updates_available": 0
+    "updates_available": 0,
+    "skipped": 0,
+    "failures": 0
   },
   "files": [],
   "references": [],
   "updates": [],
   "diagnostics": [],
+  "skips": [],
   "cache": {
     "enabled": true,
     "fresh_hits": 0,
@@ -274,21 +288,79 @@ JSON output includes:
 ```
 
 `changed` means files were written. `would_change` means updates are available
-or a dry-run/diff would modify files.
+or a dry-run/diff would modify files. Each diagnostic includes a stable `code`
+and `category`. Each intentional skip includes its file, line, and reason code.
+
+## GitHub Action
+
+Use the stable `v0` tag as a validation gate:
+
+```yaml
+- name: Check GitHub Actions references
+  uses: Goldziher/gh-actions-updater@v0
+  with:
+    operation: check
+    mode: latest
+```
+
+Set `operation: update` to rewrite the checkout. The Action never commits or
+pushes changes.
+
+| Input | Default | Values or purpose |
+| --- | --- | --- |
+| `operation` | `check` | `check` validates without writing; `update` rewrites the checkout. |
+| `mode` | `latest` | `latest`, `latest-tag`, or `latest-hash`. |
+| `path` | `.` | Repository or workspace path to scan. |
+| `recursive` | `false` | Scan nested repositories and `.github` directories. |
+| `validate` | `true` | Verify remote and local references exist. |
+| `missing-ref` | `error` | `warn`, `error`, `ignore`, or `fallback`. |
+| `version` | `latest` | `gau` release version, with or without a `v` prefix. |
+| `cache` | `true` | Cache the installed binary on the runner. |
+| `github-token` | `${{ github.token }}` | Token used for release downloads and metadata requests. |
+
+The Action exposes `version` and `install-dir` outputs. Pin the Action to an
+exact release instead of `v0` when immutable workflow dependencies are
+required.
 
 ## Pre-commit
 
 ```yaml
 repos:
   - repo: https://github.com/Goldziher/gh-actions-updater
-    rev: v0.1.7
+    rev: v0.2.0
     hooks:
-      - id: gh-actions-updater
+      - id: gh-actions-updater-check
 ```
 
-The hook entry is `gau --update`, uses the global cache, and autofixes supported
-refs. Users can pass args such as `--cache-ttl 24h`, `--no-cache`, or
-`--latest-hash`.
+The check hook runs `gau --latest --check --validate --missing-ref error`, uses
+the global cache, and never rewrites files. Use `gh-actions-updater-update` for
+the equivalent autofixing hook. The legacy `gh-actions-updater` hook id remains
+an alias for update. Users can override or extend hook arguments for settings
+such as `--cache-ttl 24h`, `--no-cache`, or `--latest-hash`.
+
+## Poly hooks
+
+This repository publishes `gh-actions-updater-check` and
+`gh-actions-updater-update` through `poly-hooks.toml`. A consumer selects them:
+
+```toml
+[[hooks.sources]]
+id = "gh-actions-updater"
+git = "https://github.com/Goldziher/gh-actions-updater.git"
+revision = "v0.2.0"
+hooks = ["gh-actions-updater-check"]
+```
+
+Choose an execution channel in the uncommitted `poly.local.toml`:
+
+```toml
+[hook_preferences]
+channels = ["system", "cargo"]
+```
+
+The `system` channel uses an installed `gau`; `cargo` installs the catalog's
+pinned package version. Run `poly hooks update` when changing the source revision
+and commit the resulting `poly-hooks.lock`.
 
 ## Exit Codes
 

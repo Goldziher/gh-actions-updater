@@ -1,14 +1,15 @@
 use crate::action_ref::{RefKind, ReferenceKind};
 use crate::cache::{CacheKeyParts, CacheLookup, CacheReport, CacheState, cache_key};
-use crate::cli::{MissingRefPolicy, PinStyle};
+use crate::cli::{MissingRefPolicy, PinStyle, UpdateMode};
 use crate::config::Settings;
 use crate::report::UpdateReport;
-use crate::scanner::{Diagnostic, DiagnosticCategory, ReferenceReport};
+use crate::scanner::{Diagnostic, DiagnosticCategory, DiagnosticCode, ReferenceReport};
 use ahash::AHashMap;
 use anyhow::{Context, Result, anyhow};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::process::Command;
 
 #[derive(Debug)]
@@ -21,6 +22,7 @@ pub struct MetadataResolution {
     /// upstream resolution. Callers apply these back to scanner output before
     /// reporting.
     pub resolved_ref_kinds: Vec<(usize, RefKind)>,
+    pub has_metadata_failures: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Eq, PartialEq, Serialize)]
@@ -38,6 +40,69 @@ pub trait TagProvider {
 
     fn fetch_commit(&self, _owner: &str, _repo: &str, _sha: &str, _etag: Option<&str>) -> Result<CommitFetch> {
         Err(anyhow!("commit metadata lookup is not supported by this provider"))
+    }
+}
+
+type RepositoryKey = (String, String);
+type ReferenceKey = (String, String, String);
+type Memoized<T> = RefCell<AHashMap<ReferenceKey, Result<T, String>>>;
+
+struct MemoizingProvider<'a, P> {
+    provider: &'a P,
+    tags: RefCell<AHashMap<RepositoryKey, Result<TagFetch, String>>>,
+    branches: Memoized<BranchFetch>,
+    commits: Memoized<CommitFetch>,
+}
+
+impl<'a, P> MemoizingProvider<'a, P> {
+    fn new(provider: &'a P) -> Self {
+        Self {
+            provider,
+            tags: RefCell::new(AHashMap::new()),
+            branches: RefCell::new(AHashMap::new()),
+            commits: RefCell::new(AHashMap::new()),
+        }
+    }
+}
+
+impl<P: TagProvider> TagProvider for MemoizingProvider<'_, P> {
+    fn fetch_tags(&self, owner: &str, repo: &str, etag: Option<&str>) -> Result<TagFetch> {
+        let key = (owner.to_string(), repo.to_string());
+        if let Some(result) = self.tags.borrow().get(&key) {
+            return result.clone().map_err(|message| anyhow!(message));
+        }
+        let result = self
+            .provider
+            .fetch_tags(owner, repo, etag)
+            .map_err(|error| error.to_string());
+        self.tags.borrow_mut().insert(key, result.clone());
+        result.map_err(|message| anyhow!(message))
+    }
+
+    fn fetch_branch(&self, owner: &str, repo: &str, branch: &str, etag: Option<&str>) -> Result<BranchFetch> {
+        let key = (owner.to_string(), repo.to_string(), branch.to_string());
+        if let Some(result) = self.branches.borrow().get(&key) {
+            return result.clone().map_err(|message| anyhow!(message));
+        }
+        let result = self
+            .provider
+            .fetch_branch(owner, repo, branch, etag)
+            .map_err(|error| error.to_string());
+        self.branches.borrow_mut().insert(key, result.clone());
+        result.map_err(|message| anyhow!(message))
+    }
+
+    fn fetch_commit(&self, owner: &str, repo: &str, sha: &str, etag: Option<&str>) -> Result<CommitFetch> {
+        let key = (owner.to_string(), repo.to_string(), sha.to_string());
+        if let Some(result) = self.commits.borrow().get(&key) {
+            return result.clone().map_err(|message| anyhow!(message));
+        }
+        let result = self
+            .provider
+            .fetch_commit(owner, repo, sha, etag)
+            .map_err(|error| error.to_string());
+        self.commits.borrow_mut().insert(key, result.clone());
+        result.map_err(|message| anyhow!(message))
     }
 }
 
@@ -98,7 +163,10 @@ pub struct GitHubRestProvider {
     api_url: String,
     token: Option<String>,
     fallback: Option<GitLsRemoteProvider>,
+    agent: ureq::Agent,
 }
+
+const MAX_GITHUB_REDIRECTS: u32 = 5;
 
 impl GitHubRestProvider {
     pub fn new(settings: &Settings) -> Self {
@@ -112,6 +180,12 @@ impl GitHubRestProvider {
             api_url,
             token: settings.github_token.clone(),
             fallback,
+            agent: ureq::Agent::config_builder()
+                .https_only(true)
+                .max_redirects(MAX_GITHUB_REDIRECTS)
+                .redirect_auth_headers(ureq::config::RedirectAuthHeaders::SameHost)
+                .build()
+                .into(),
         }
     }
 }
@@ -135,7 +209,9 @@ impl TagProvider for GitHubRestProvider {
         let mut first_page = true;
 
         loop {
-            let mut request = ureq::get(&url)
+            let mut request = self
+                .agent
+                .get(&url)
                 .header("Accept", "application/vnd.github+json")
                 .header("User-Agent", concat!("gh-actions-updater/", env!("CARGO_PKG_VERSION")));
             if let Some(token) = &self.token {
@@ -196,7 +272,9 @@ impl TagProvider for GitHubRestProvider {
     fn fetch_branch(&self, owner: &str, repo: &str, branch: &str, etag: Option<&str>) -> Result<BranchFetch> {
         let encoded_branch = branch.replace('/', "%2F");
         let url = format!("{}/repos/{owner}/{repo}/branches/{encoded_branch}", self.api_url);
-        let mut request = ureq::get(&url)
+        let mut request = self
+            .agent
+            .get(&url)
             .header("Accept", "application/vnd.github+json")
             .header("User-Agent", concat!("gh-actions-updater/", env!("CARGO_PKG_VERSION")));
         if let Some(token) = &self.token {
@@ -249,7 +327,9 @@ impl TagProvider for GitHubRestProvider {
 
     fn fetch_commit(&self, owner: &str, repo: &str, sha: &str, etag: Option<&str>) -> Result<CommitFetch> {
         let url = format!("{}/repos/{owner}/{repo}/commits/{sha}", self.api_url);
-        let mut request = ureq::get(&url)
+        let mut request = self
+            .agent
+            .get(&url)
             .header("Accept", "application/vnd.github+json")
             .header("User-Agent", concat!("gh-actions-updater/", env!("CARGO_PKG_VERSION")));
         if let Some(token) = &self.token {
@@ -347,9 +427,12 @@ pub fn resolve_updates_with_provider(
     references: &[ReferenceReport],
     provider: &impl TagProvider,
 ) -> Result<MetadataResolution> {
+    let memoizing_provider = MemoizingProvider::new(provider);
+    let provider = &memoizing_provider;
     let mut diagnostics = Vec::new();
     let mut updates = Vec::new();
     let mut resolved_ref_kinds: Vec<(usize, RefKind)> = Vec::new();
+    let mut has_metadata_failures = false;
     let mut tags_by_repo: AHashMap<(String, String), TagLoad> = AHashMap::new();
     let update_exclude = build_update_exclude_globset(&settings.update_exclude)?;
 
@@ -376,8 +459,9 @@ pub fn resolve_updates_with_provider(
             reference.update_ignored || is_update_excluded(&update_exclude, reference.raw.as_str(), owner, repo);
 
         let semver_update = matches!(reference.parsed.ref_kind, RefKind::SemverLikeTag);
-        let sha_update = settings.latest_hash && reference.parsed.ref_kind == RefKind::Sha;
-        let sha_advisory = !settings.latest_hash && reference.parsed.ref_kind == RefKind::Sha;
+        let use_hash = mode_uses_hash(settings, &reference.parsed.ref_kind);
+        let sha_update = use_hash && reference.parsed.ref_kind == RefKind::Sha;
+        let sha_advisory = !use_hash && reference.parsed.ref_kind == RefKind::Sha;
         let needs_classification = matches!(
             reference.parsed.ref_kind,
             RefKind::BranchOrUnknown | RefKind::Branch | RefKind::NonSemverTag
@@ -392,7 +476,20 @@ pub fn resolve_updates_with_provider(
         if needs_tags {
             let repo_key = (owner.to_string(), repo.to_string());
             if !tags_by_repo.contains_key(&repo_key) {
-                let tags = load_tags(settings, &mut cache, provider, owner, repo)?;
+                let tags = match load_tags(settings, &mut cache, provider, owner, repo) {
+                    Ok(tags) => tags,
+                    Err(error) => {
+                        diagnostics.push(Diagnostic {
+                            file: reference.file.clone(),
+                            line: Some(reference.line),
+                            message: format!("metadata lookup failed for {owner}/{repo}: {error:#}"),
+                            code: DiagnosticCode::MetadataLookupFailed,
+                            category: DiagnosticCategory::Metadata,
+                        });
+                        has_metadata_failures = true;
+                        continue;
+                    }
+                };
                 tags_by_repo.insert(repo_key.clone(), tags);
             }
             let tag_load = tags_by_repo
@@ -403,7 +500,8 @@ pub fn resolve_updates_with_provider(
                     file: reference.file.clone(),
                     line: Some(reference.line),
                     message: warning.clone(),
-                    category: DiagnosticCategory::General,
+                    code: DiagnosticCode::MetadataLookupFailed,
+                    category: DiagnosticCategory::Metadata,
                 });
             }
             let tags = &tag_load.tags;
@@ -414,13 +512,22 @@ pub fn resolve_updates_with_provider(
                         effective_ref_kind = RefKind::NonSemverTag;
                         classification_sha = Some(tag.sha.clone());
                     } else {
-                        let branch_lookup = load_branch_exists(settings, &mut cache, provider, owner, repo, current)?;
+                        let branch_lookup =
+                            match load_branch_exists(settings, &mut cache, provider, owner, repo, current) {
+                                Ok(lookup) => lookup,
+                                Err(error) => {
+                                    push_metadata_failure(reference, &error, &mut diagnostics);
+                                    has_metadata_failures = true;
+                                    continue;
+                                }
+                            };
                         if let Some(warning) = branch_lookup.warning {
                             diagnostics.push(Diagnostic {
                                 file: reference.file.clone(),
                                 line: Some(reference.line),
                                 message: warning,
-                                category: DiagnosticCategory::General,
+                                code: DiagnosticCode::MetadataLookupFailed,
+                                category: DiagnosticCategory::Metadata,
                             });
                         }
                         if let Some(sha) = branch_lookup.value {
@@ -435,18 +542,48 @@ pub fn resolve_updates_with_provider(
                     if let Some(tag) = tags.iter().find(|tag| tag.name == current) {
                         classification_sha = Some(tag.sha.clone());
                     } else {
-                        let branch_lookup = load_branch_exists(settings, &mut cache, provider, owner, repo, current)?;
+                        let branch_lookup =
+                            match load_branch_exists(settings, &mut cache, provider, owner, repo, current) {
+                                Ok(lookup) => lookup,
+                                Err(error) => {
+                                    push_metadata_failure(reference, &error, &mut diagnostics);
+                                    has_metadata_failures = true;
+                                    continue;
+                                }
+                            };
                         classification_sha = branch_lookup.value;
                     }
                 }
             }
 
             if settings.validate {
+                if effective_ref_kind == RefKind::SemverLikeTag && !tags.iter().any(|tag| tag.name == current) {
+                    let branch_lookup = match load_branch_exists(settings, &mut cache, provider, owner, repo, current) {
+                        Ok(lookup) => lookup,
+                        Err(error) => {
+                            push_metadata_failure(reference, &error, &mut diagnostics);
+                            has_metadata_failures = true;
+                            continue;
+                        }
+                    };
+                    if let Some(sha) = branch_lookup.value {
+                        effective_ref_kind = RefKind::Branch;
+                        classification_sha = Some(sha);
+                        resolved_ref_kinds.push((idx, RefKind::Branch));
+                    }
+                }
                 let exists_upstream = match effective_ref_kind {
                     RefKind::SemverLikeTag | RefKind::NonSemverTag => tags.iter().any(|tag| tag.name == current),
                     RefKind::Branch => classification_sha.is_some(),
                     RefKind::BranchOrUnknown => false,
-                    RefKind::Sha => load_commit_exists(settings, &mut cache, provider, owner, repo, current)?,
+                    RefKind::Sha => match load_commit_exists(settings, &mut cache, provider, owner, repo, current) {
+                        Ok(exists) => exists,
+                        Err(error) => {
+                            push_metadata_failure(reference, &error, &mut diagnostics);
+                            has_metadata_failures = true;
+                            continue;
+                        }
+                    },
                     RefKind::None => true,
                 };
                 if !exists_upstream {
@@ -462,18 +599,18 @@ pub fn resolve_updates_with_provider(
         let update_candidate =
             if settings.pin_floating_to_sha && matches!(effective_ref_kind, RefKind::Branch | RefKind::NonSemverTag) {
                 classification_sha.is_some()
-            } else if settings.latest_hash {
+            } else if use_hash {
                 matches!(effective_ref_kind, RefKind::SemverLikeTag | RefKind::Sha)
             } else {
                 matches!(effective_ref_kind, RefKind::SemverLikeTag | RefKind::Sha)
             };
 
-        let sha_advisory = !settings.latest_hash && !settings.pin_floating_to_sha && effective_ref_kind == RefKind::Sha;
+        let use_hash = mode_uses_hash(settings, &effective_ref_kind);
+        let sha_advisory = !use_hash && !settings.pin_floating_to_sha && effective_ref_kind == RefKind::Sha;
 
-        let semver_update = !settings.pin_floating_to_sha
-            && !sha_advisory
+        let semver_update = !sha_advisory
             && (matches!(effective_ref_kind, RefKind::SemverLikeTag)
-                || (settings.latest_hash && effective_ref_kind == RefKind::Sha));
+                || (use_hash && effective_ref_kind == RefKind::Sha));
 
         if !update_candidate && !sha_advisory {
             continue;
@@ -501,7 +638,7 @@ pub fn resolve_updates_with_provider(
         }
 
         if sha_advisory {
-            let decision = select_hash_update_target(
+            let decision = match select_hash_update_target(
                 &Settings {
                     latest_hash: true,
                     ..settings.clone()
@@ -511,7 +648,14 @@ pub fn resolve_updates_with_provider(
                 reference,
                 current,
                 tags,
-            )?;
+            ) {
+                Ok(decision) => decision,
+                Err(error) => {
+                    push_metadata_failure(reference, &error, &mut diagnostics);
+                    has_metadata_failures = true;
+                    continue;
+                }
+            };
             if let Some(target) = decision.target {
                 if !target.sha.is_empty() && !target.sha.eq_ignore_ascii_case(current) {
                     let short = if current.len() >= 8 { &current[..8] } else { current };
@@ -523,6 +667,7 @@ pub fn resolve_updates_with_provider(
                             tag = target.name,
                             newer_short = if target.sha.len() >= 8 { &target.sha[..8] } else { target.sha.as_str() },
                         ),
+                        code: DiagnosticCode::General,
                         category: DiagnosticCategory::General,
                     });
                 }
@@ -535,6 +680,7 @@ pub fn resolve_updates_with_provider(
                     file: reference.file.clone(),
                     line: Some(reference.line),
                     message,
+                    code: DiagnosticCode::General,
                     category: DiagnosticCategory::General,
                 });
             }
@@ -545,10 +691,18 @@ pub fn resolve_updates_with_provider(
             continue;
         }
 
-        let decision = if settings.latest_hash {
-            select_hash_update_target(settings, &mut cache, provider, reference, current, tags)?
+        let decision_result = if use_hash {
+            select_hash_update_target(settings, &mut cache, provider, reference, current, tags)
         } else {
-            select_tag_update_target(settings, &mut cache, provider, reference, current, tags)?
+            select_tag_update_target(settings, &mut cache, provider, reference, current, tags)
+        };
+        let decision = match decision_result {
+            Ok(decision) => decision,
+            Err(error) => {
+                push_metadata_failure(reference, &error, &mut diagnostics);
+                has_metadata_failures = true;
+                continue;
+            }
         };
         let Some(target) = decision.target else {
             if decision.current_missing {
@@ -559,15 +713,23 @@ pub fn resolve_updates_with_provider(
                     file: reference.file.clone(),
                     line: Some(reference.line),
                     message,
+                    code: DiagnosticCode::General,
                     category: DiagnosticCategory::General,
                 });
             }
             continue;
         };
 
-        let target_ref = if settings.latest_hash { target.sha } else { target.name };
+        let target_ref = if use_hash { target.sha } else { target.name };
 
         if target_ref != current && (!decision.current_missing || settings.missing_ref == MissingRefPolicy::Fallback) {
+            if decision.current_missing && settings.missing_ref == MissingRefPolicy::Fallback {
+                diagnostics.retain(|diagnostic| {
+                    diagnostic.code != DiagnosticCode::RemoteReferenceMissing
+                        || diagnostic.file != reference.file
+                        || diagnostic.line != Some(reference.line)
+                });
+            }
             updates.push(UpdateReport {
                 file: reference.file.clone(),
                 line: reference.line,
@@ -582,17 +744,60 @@ pub fn resolve_updates_with_provider(
                 file: reference.file.clone(),
                 line: Some(reference.line),
                 message,
+                code: DiagnosticCode::General,
                 category: DiagnosticCategory::General,
             });
         }
     }
 
+    let mut metadata_failure_keys = ahash::AHashSet::new();
+    let mut missing_reference_keys = ahash::AHashSet::new();
+    diagnostics.retain(|diagnostic| {
+        if diagnostic.code == DiagnosticCode::MetadataLookupFailed {
+            return metadata_failure_keys.insert((
+                diagnostic.file.clone(),
+                diagnostic.line,
+                diagnostic.message.clone(),
+            ));
+        }
+        if diagnostic.code == DiagnosticCode::RemoteReferenceMissing {
+            return missing_reference_keys.insert((
+                diagnostic.file.clone(),
+                diagnostic.line,
+                diagnostic.message.clone(),
+            ));
+        }
+        true
+    });
+
     Ok(MetadataResolution {
         updates,
         diagnostics,
         resolved_ref_kinds,
+        has_metadata_failures,
         cache: cache.report,
     })
+}
+
+fn mode_uses_hash(settings: &Settings, ref_kind: &RefKind) -> bool {
+    if settings.latest_hash {
+        return true;
+    }
+    match settings.update_mode {
+        UpdateMode::LatestHash => true,
+        UpdateMode::LatestTag => false,
+        UpdateMode::Latest => *ref_kind == RefKind::Sha,
+    }
+}
+
+fn push_metadata_failure(reference: &ReferenceReport, error: &anyhow::Error, diagnostics: &mut Vec<Diagnostic>) {
+    diagnostics.push(Diagnostic {
+        file: reference.file.clone(),
+        line: Some(reference.line),
+        message: format!("metadata lookup failed for {}: {error:#}", reference.raw),
+        code: DiagnosticCode::MetadataLookupFailed,
+        category: DiagnosticCategory::Metadata,
+    });
 }
 
 fn build_update_exclude_globset(patterns: &[String]) -> Result<GlobSet> {
@@ -873,29 +1078,103 @@ fn validate_local_reference(reference: &ReferenceReport, diagnostics: &mut Vec<D
         return;
     };
     let workflow_path = std::path::Path::new(&reference.file);
-    let base = workflow_path.parent().unwrap_or(std::path::Path::new("."));
-    let target_path = base.join(rel);
-    let candidate = if target_path.is_dir() {
-        let action_yml = target_path.join("action.yml");
-        let action_yaml = target_path.join("action.yaml");
-        if action_yml.exists() {
-            action_yml
-        } else if action_yaml.exists() {
-            action_yaml
-        } else {
-            target_path.clone()
-        }
-    } else {
-        target_path.clone()
-    };
-    if !candidate.exists() {
+    let base = repository_root_for(workflow_path);
+    let Some(target_path) = local_target_within_repository(base, std::path::Path::new(rel)) else {
         diagnostics.push(Diagnostic {
             file: reference.file.clone(),
             line: Some(reference.line),
-            message: format!("local reference does not exist on disk: {rel}"),
-            category: DiagnosticCategory::General,
+            message: format!("local reference escapes repository root: {rel}"),
+            code: DiagnosticCode::LocalReferenceEscapesRepository,
+            category: DiagnosticCategory::Validation,
+        });
+        return;
+    };
+    let Some(candidate) = local_reference_candidate(&reference.parsed.kind, &target_path) else {
+        push_local_missing(reference, rel, diagnostics, "expected action metadata or workflow file");
+        return;
+    };
+    let canonical_root = match std::fs::canonicalize(base) {
+        Ok(path) => path,
+        Err(error) => {
+            push_local_missing(
+                reference,
+                rel,
+                diagnostics,
+                &format!("failed to resolve repository root: {error}"),
+            );
+            return;
+        }
+    };
+    let canonical_target = match std::fs::canonicalize(&target_path) {
+        Ok(path) => path,
+        Err(error) => {
+            push_local_missing(
+                reference,
+                rel,
+                diagnostics,
+                &format!("failed to resolve local target: {error}"),
+            );
+            return;
+        }
+    };
+    let canonical_candidate = match std::fs::canonicalize(&candidate) {
+        Ok(path) => path,
+        Err(error) => {
+            push_local_missing(
+                reference,
+                rel,
+                diagnostics,
+                &format!("failed to resolve local reference: {error}"),
+            );
+            return;
+        }
+    };
+    if !canonical_target.starts_with(&canonical_root) || !canonical_candidate.starts_with(&canonical_root) {
+        diagnostics.push(Diagnostic {
+            file: reference.file.clone(),
+            line: Some(reference.line),
+            message: format!("local reference escapes repository root through symlink: {rel}"),
+            code: DiagnosticCode::LocalReferenceEscapesRepository,
+            category: DiagnosticCategory::Validation,
         });
     }
+}
+
+fn local_reference_candidate(kind: &ReferenceKind, target: &std::path::Path) -> Option<std::path::PathBuf> {
+    match kind {
+        ReferenceKind::LocalAction if target.is_dir() => [target.join("action.yml"), target.join("action.yaml")]
+            .into_iter()
+            .find(|candidate| candidate.is_file()),
+        ReferenceKind::LocalWorkflow if target.is_file() => Some(target.to_path_buf()),
+        _ => None,
+    }
+}
+
+fn push_local_missing(reference: &ReferenceReport, relative: &str, diagnostics: &mut Vec<Diagnostic>, context: &str) {
+    diagnostics.push(Diagnostic {
+        file: reference.file.clone(),
+        line: Some(reference.line),
+        message: format!("local reference does not exist on disk: {relative} ({context})"),
+        code: DiagnosticCode::LocalReferenceMissing,
+        category: DiagnosticCategory::Validation,
+    });
+}
+
+fn local_target_within_repository(base: &std::path::Path, relative: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut normalized = std::path::PathBuf::new();
+    for component in relative.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(part) => normalized.push(part),
+            std::path::Component::ParentDir => {
+                if !normalized.pop() {
+                    return None;
+                }
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => return None,
+        }
+    }
+    Some(base.join(normalized))
 }
 
 fn handle_missing_ref(
@@ -908,17 +1187,23 @@ fn handle_missing_ref(
     }
 
     let message = format!("remote ref no longer exists: {}", reference.raw);
-    if settings.missing_ref == MissingRefPolicy::Error && !settings.check {
-        return Err(anyhow!(message));
-    }
-
     diagnostics.push(Diagnostic {
         file: reference.file.clone(),
         line: Some(reference.line),
         message,
-        category: DiagnosticCategory::General,
+        code: DiagnosticCode::RemoteReferenceMissing,
+        category: DiagnosticCategory::Validation,
     });
     Ok(())
+}
+
+fn repository_root_for(path: &std::path::Path) -> &std::path::Path {
+    let directory = path.parent().unwrap_or(std::path::Path::new("."));
+    directory
+        .ancestors()
+        .find(|ancestor| ancestor.join(".git").exists())
+        .or_else(|| directory.ancestors().find(|ancestor| ancestor.join(".github").is_dir()))
+        .unwrap_or(directory)
 }
 
 #[derive(Debug)]
@@ -978,12 +1263,13 @@ fn select_tag_update_target(
         }
         parse_version_tag(&tag.name).is_some_and(|target_version| target_version > current_ref.version)
     });
-    let target = latest
+    let mut target = latest
         .as_ref()
         .map(|tag| format_pin_style(settings.pin_style, current, &current_ref, tag));
-    let floating_ref_is_resolved = current_ref.precision != VersionPrecision::Full
-        && target.as_deref().is_some_and(|target| target != current)
-        || target.as_deref() == Some(current);
+    if !current_exists && settings.missing_ref == MissingRefPolicy::Fallback {
+        target = latest.as_ref().map(|tag| tag.name.clone());
+    }
+    let floating_ref_is_resolved = current_exists;
 
     if settings.latest_hash
         && !current_exists
@@ -1094,17 +1380,6 @@ fn select_hash_update_target(
                 });
             }
 
-            if settings.preserve_major && current_tag_version.is_none() {
-                return Ok(TargetDecision {
-                    target: None,
-                    current_missing: !current_exists,
-                    diagnostic: Some(format!(
-                        "cannot infer semver major for pinned SHA {}; use preserve_major = false to allow latest-hash updates",
-                        current
-                    )),
-                });
-            }
-
             let major = current_tag_version.map(|version| version.major);
             Ok(TargetDecision {
                 target: latest_semver_tag(settings, tags, major),
@@ -1135,11 +1410,19 @@ pub fn exit_code_for_resolution(settings: &Settings, resolution: &MetadataResolu
     }
 
     if settings.check
-        && settings.missing_ref == MissingRefPolicy::Error
+        && resolution.diagnostics.iter().any(|diagnostic| {
+            diagnostic.category == DiagnosticCategory::Validation
+                && diagnostic.code != DiagnosticCode::RemoteReferenceMissing
+        })
+    {
+        return Some(1);
+    }
+
+    if settings.missing_ref == MissingRefPolicy::Error
         && resolution
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.message.contains("remote ref no longer exists"))
+            .any(|diagnostic| diagnostic.code == DiagnosticCode::RemoteReferenceMissing)
     {
         return Some(1);
     }
@@ -1268,9 +1551,9 @@ mod tests {
         parse_ls_remote_tags, resolve_updates_with_provider,
     };
     use crate::cache::{CacheKeyParts, CacheState, cache_key};
-    use crate::cli::{ColorChoice, MissingRefPolicy, OutputFormat, PinStyle};
+    use crate::cli::{ColorChoice, MissingRefPolicy, OutputFormat, PinStyle, UpdateMode};
     use crate::config::{CacheTtl, Settings};
-    use crate::scanner::ReferenceReport;
+    use crate::scanner::{DiagnosticCategory, DiagnosticCode, ReferenceReport};
     use anyhow::Result;
     use std::cell::Cell;
     use std::path::Path;
@@ -1341,6 +1624,35 @@ mod tests {
         branch_calls: Cell<usize>,
     }
 
+    struct SelectiveFailureProvider {
+        branch_calls: Cell<usize>,
+        commit_calls: Cell<usize>,
+    }
+
+    impl TagProvider for SelectiveFailureProvider {
+        fn fetch_tags(&self, owner: &str, _repo: &str, _etag: Option<&str>) -> Result<TagFetch> {
+            let tags = if owner == "working" {
+                vec![
+                    tag_with_sha("v1.0.0", "1111111111111111111111111111111111111111"),
+                    tag_with_sha("v1.1.0", "2222222222222222222222222222222222222222"),
+                ]
+            } else {
+                Vec::new()
+            };
+            Ok(TagFetch::Fresh { tags, etag: None })
+        }
+
+        fn fetch_branch(&self, _owner: &str, _repo: &str, _branch: &str, _etag: Option<&str>) -> Result<BranchFetch> {
+            self.branch_calls.set(self.branch_calls.get() + 1);
+            anyhow::bail!("branch lookup unavailable")
+        }
+
+        fn fetch_commit(&self, _owner: &str, _repo: &str, _sha: &str, _etag: Option<&str>) -> Result<CommitFetch> {
+            self.commit_calls.set(self.commit_calls.get() + 1);
+            anyhow::bail!("commit lookup unavailable")
+        }
+    }
+
     impl TagProvider for BranchCheckingProvider {
         fn fetch_tags(&self, _owner: &str, _repo: &str, _etag: Option<&str>) -> Result<TagFetch> {
             self.tag_calls.set(self.tag_calls.get() + 1);
@@ -1372,6 +1684,7 @@ mod tests {
             cache_enabled: true,
             refresh_cache: false,
             update: false,
+            update_mode: UpdateMode::LatestTag,
             latest_hash: false,
             pin_style: PinStyle::Preserve,
             update_exclude: Vec::new(),
@@ -1395,6 +1708,72 @@ mod tests {
             validate: false,
             pin_floating_to_sha: false,
         }
+    }
+
+    #[test]
+    fn aggregates_and_deduplicates_branch_failures_while_preserving_updates() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.validate = true;
+        let provider = SelectiveFailureProvider {
+            branch_calls: Cell::new(0),
+            commit_calls: Cell::new(0),
+        };
+        let first_failure = reference("broken/action@v1");
+        let mut second_failure = reference("broken/action@v1");
+        second_failure.file = ".github/workflows/release.yml".to_string();
+        second_failure.line = 19;
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[first_failure, second_failure, reference("working/action@v1.0.0")],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(resolution.has_metadata_failures);
+        assert_eq!(provider.branch_calls.get(), 1);
+        assert_eq!(resolution.updates[0].target.as_deref(), Some("v1.1.0"));
+        assert_eq!(
+            resolution
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == DiagnosticCode::MetadataLookupFailed)
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn aggregates_and_deduplicates_commit_failures_while_preserving_updates() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.update_mode = UpdateMode::LatestHash;
+        let provider = SelectiveFailureProvider {
+            branch_calls: Cell::new(0),
+            commit_calls: Cell::new(0),
+        };
+        let sha = "9999999999999999999999999999999999999999";
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[
+                reference(&format!("broken/action@{sha}")),
+                reference(&format!("broken/action@{sha}")),
+                reference("working/action@v1.0.0"),
+            ],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(resolution.has_metadata_failures);
+        assert_eq!(provider.commit_calls.get(), 1);
+        assert_eq!(
+            resolution.updates[0].target.as_deref(),
+            Some("2222222222222222222222222222222222222222")
+        );
     }
 
     fn reference(raw: &str) -> ReferenceReport {
@@ -1457,7 +1836,8 @@ mod tests {
         .unwrap();
 
         assert!(resolution.updates.is_empty());
-        assert!(resolution.diagnostics.is_empty());
+        assert_eq!(resolution.diagnostics.len(), 1);
+        assert_eq!(resolution.diagnostics[0].code, DiagnosticCode::RemoteReferenceMissing);
     }
 
     #[test]
@@ -1528,7 +1908,7 @@ mod tests {
     }
 
     #[test]
-    fn full_pin_style_converts_floats_to_latest_full_tag() {
+    fn full_pin_style_does_not_convert_missing_floating_tag_without_fallback() {
         let temp = tempfile::tempdir().unwrap();
         let mut settings = settings(temp.path());
         settings.pin_style = PinStyle::Full;
@@ -1545,8 +1925,8 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(resolution.updates.len(), 1);
-        assert_eq!(resolution.updates[0].target.as_deref(), Some("v1.25.0"));
+        assert!(resolution.updates.is_empty());
+        assert_eq!(resolution.diagnostics[0].code, DiagnosticCode::RemoteReferenceMissing);
     }
 
     #[test]
@@ -1765,7 +2145,7 @@ mod tests {
     }
 
     #[test]
-    fn latest_hash_checks_unmatched_sha_and_requires_major_opt_out() {
+    fn latest_hash_updates_unmatched_valid_sha_across_majors() {
         let temp = tempfile::tempdir().unwrap();
         let mut settings = settings(temp.path());
         settings.latest_hash = true;
@@ -1784,9 +2164,11 @@ mod tests {
         )
         .unwrap();
 
-        assert!(resolution.updates.is_empty());
+        assert_eq!(
+            resolution.updates[0].target.as_deref(),
+            Some("2222222222222222222222222222222222222222")
+        );
         assert_eq!(provider.commit_calls.get(), 1);
-        assert!(resolution.diagnostics[0].message.contains("cannot infer semver major"));
     }
 
     #[test]
@@ -1945,6 +2327,38 @@ mod tests {
     }
 
     #[test]
+    fn validation_accepts_semver_looking_branches_used_by_corpus_actions() {
+        for raw in [
+            "ruby/setup-ruby@v1",
+            "rust-lang/crates-io-auth-action@v1",
+            "arduino/setup-task@v2",
+            "arduino/setup-task@v3",
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let mut settings = settings(temp.path());
+            settings.validate = true;
+            settings.missing_ref = MissingRefPolicy::Error;
+            let provider = BranchCheckingProvider {
+                tags: Vec::new(),
+                branch_exists: true,
+                tag_calls: Cell::new(0),
+                branch_calls: Cell::new(0),
+            };
+
+            let resolution = resolve_updates_with_provider(
+                &settings,
+                CacheState::prepare(&settings).unwrap(),
+                &[reference(raw)],
+                &provider,
+            )
+            .unwrap();
+
+            assert!(resolution.diagnostics.is_empty(), "false missing diagnostic for {raw}");
+            assert_eq!(provider.branch_calls.get(), 1);
+        }
+    }
+
+    #[test]
     fn branch_backed_semver_ref_wins_over_matching_tag_updates() {
         let temp = tempfile::tempdir().unwrap();
         let settings = settings(temp.path());
@@ -1993,6 +2407,67 @@ mod tests {
     }
 
     #[test]
+    fn successful_missing_ref_fallback_is_not_a_validation_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.pin_style = PinStyle::Full;
+        settings.missing_ref = MissingRefPolicy::Fallback;
+        settings.validate = true;
+        let provider = FakeProvider {
+            tags: vec![tag("v4.1.0")],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("actions/checkout@v4")],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(resolution.updates.len(), 1);
+        assert!(
+            !resolution
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.category == DiagnosticCategory::Validation)
+        );
+        assert_eq!(exit_code_for_resolution(&settings, &resolution), None);
+    }
+
+    #[test]
+    fn mixed_mode_fallback_rewrites_missing_float_without_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.update_mode = UpdateMode::Latest;
+        settings.pin_floating_to_sha = true;
+        settings.missing_ref = MissingRefPolicy::Fallback;
+        settings.validate = true;
+        let provider = FakeProvider {
+            tags: vec![tag("v8.0.0")],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("astral-sh/setup-uv@v8")],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(resolution.updates[0].target.as_deref(), Some("v8.0.0"));
+        assert!(
+            !resolution
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::RemoteReferenceMissing)
+        );
+        assert_eq!(exit_code_for_resolution(&settings, &resolution), None);
+    }
+
+    #[test]
     fn missing_ref_fallback_counts_update() {
         let temp = tempfile::tempdir().unwrap();
         let mut settings = settings(temp.path());
@@ -2036,6 +2511,146 @@ mod tests {
         .unwrap();
 
         assert_eq!(exit_code_for_resolution(&settings, &resolution), Some(1));
+    }
+
+    #[test]
+    fn missing_ref_error_returns_full_resolution_outside_check_mode() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.missing_ref = MissingRefPolicy::Error;
+        let provider = FakeProvider {
+            tags: vec![tag("v4.1.0")],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("actions/checkout@v4.0.0")],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(resolution.diagnostics[0].code, DiagnosticCode::RemoteReferenceMissing);
+        assert_eq!(exit_code_for_resolution(&settings, &resolution), Some(1));
+    }
+
+    #[test]
+    fn missing_ref_exit_uses_diagnostic_code_instead_of_message_text() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.missing_ref = MissingRefPolicy::Error;
+        let provider = FakeProvider {
+            tags: Vec::new(),
+            calls: Cell::new(0),
+        };
+        let mut resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("actions/checkout@v4.0.0")],
+            &provider,
+        )
+        .unwrap();
+        resolution.diagnostics[0].message = "localized missing reference message".to_string();
+
+        assert_eq!(exit_code_for_resolution(&settings, &resolution), Some(1));
+    }
+
+    #[test]
+    fn duplicate_missing_reference_at_same_location_is_reported_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = settings(temp.path());
+        let provider = FakeProvider {
+            tags: Vec::new(),
+            calls: Cell::new(0),
+        };
+        let missing = reference("spikard/action@v1.0.0");
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[missing.clone(), missing],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolution
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == DiagnosticCode::RemoteReferenceMissing)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn local_reference_cannot_escape_repository_to_existing_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let repository = temp.path().join("repository");
+        let external = temp.path().join("external");
+        std::fs::create_dir_all(repository.join(".git")).unwrap();
+        std::fs::create_dir_all(repository.join(".github/workflows")).unwrap();
+        std::fs::create_dir_all(&external).unwrap();
+        std::fs::write(external.join("action.yml"), "name: external").unwrap();
+        let mut settings = settings(&repository);
+        settings.validate = true;
+        let provider = FakeProvider {
+            tags: Vec::new(),
+            calls: Cell::new(0),
+        };
+        let mut escaped = reference("../external");
+        escaped.file = repository.join(".github/workflows/ci.yml").display().to_string();
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[escaped],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolution.diagnostics[0].code,
+            DiagnosticCode::LocalReferenceEscapesRepository
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_reference_cannot_escape_repository_through_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let repository = temp.path().join("repository");
+        let external = temp.path().join("external");
+        std::fs::create_dir_all(repository.join(".git")).unwrap();
+        std::fs::create_dir_all(repository.join(".github/workflows")).unwrap();
+        std::fs::create_dir_all(repository.join(".github/actions")).unwrap();
+        std::fs::create_dir_all(&external).unwrap();
+        std::fs::write(external.join("action.yml"), "name: external").unwrap();
+        symlink(&external, repository.join(".github/actions/external")).unwrap();
+        let mut settings = settings(&repository);
+        settings.validate = true;
+        let provider = FakeProvider {
+            tags: Vec::new(),
+            calls: Cell::new(0),
+        };
+        let mut escaped = reference("./.github/actions/external");
+        escaped.file = repository.join(".github/workflows/ci.yml").display().to_string();
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[escaped],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolution.diagnostics[0].code,
+            DiagnosticCode::LocalReferenceEscapesRepository
+        );
     }
 
     #[test]
@@ -2099,6 +2714,20 @@ mod tests {
         );
     }
 
+    #[test]
+    fn github_provider_uses_hardened_redirect_policy() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = settings(temp.path());
+        let provider = super::GitHubRestProvider::new(&settings);
+
+        assert!(provider.agent.config().https_only());
+        assert_eq!(provider.agent.config().max_redirects(), super::MAX_GITHUB_REDIRECTS);
+        assert_eq!(
+            provider.agent.config().redirect_auth_headers(),
+            ureq::config::RedirectAuthHeaders::SameHost
+        );
+    }
+
     fn tags_cache_key(owner: &str, repo: &str) -> String {
         cache_key(CacheKeyParts {
             api_host: "https://api.github.com",
@@ -2107,6 +2736,46 @@ mod tests {
             lookup_mode: "tags",
             auth_fingerprint: "anonymous",
         })
+    }
+
+    #[test]
+    fn latest_with_floating_pinning_updates_tags_shas_and_branches_additively() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.update_mode = UpdateMode::Latest;
+        settings.pin_floating_to_sha = true;
+        let provider = BranchCheckingProvider {
+            tags: vec![
+                tag_with_sha("v1.0.0", "1111111111111111111111111111111111111111"),
+                tag_with_sha("v1.1.0", "2222222222222222222222222222222222222222"),
+            ],
+            branch_exists: true,
+            tag_calls: Cell::new(0),
+            branch_calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[
+                reference("owner/action@v1.0.0"),
+                reference("owner/action@1111111111111111111111111111111111111111"),
+                reference("owner/action@main"),
+            ],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(resolution.updates.len(), 3);
+        assert_eq!(resolution.updates[0].target.as_deref(), Some("v1.1.0"));
+        assert_eq!(
+            resolution.updates[1].target.as_deref(),
+            Some("2222222222222222222222222222222222222222")
+        );
+        assert_eq!(
+            resolution.updates[2].target.as_deref(),
+            Some("0123456789abcdef0123456789abcdef01234567")
+        );
     }
 
     #[test]

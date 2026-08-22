@@ -1,0 +1,35 @@
+version = 1
+
+[[hooks]]
+id = "gh-actions-updater-check"
+stages = ["pre-commit"]
+args = ["--latest", "--check", "--validate", "--missing-ref", "error"]
+workspace = true
+pass_filenames = false
+always_run = true
+[[hooks.paths]]
+channel = "system"
+check = "command -v gau"
+run = "gau"
+[[hooks.paths]]
+channel = "cargo"
+check = "test -x \"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
+install = "cargo install --locked gh-actions-updater --version 0.2.0"
+run = "\"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
+
+[[hooks]]
+id = "gh-actions-updater-update"
+stages = ["pre-commit"]
+args = ["--latest", "--update", "--validate", "--missing-ref", "error"]
+workspace = true
+pass_filenames = false
+always_run = true
+[[hooks.paths]]
+channel = "system"
+check = "command -v gau"
+run = "gau"
+[[hooks.paths]]
+channel = "cargo"
+check = "test -x \"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
+install = "cargo install --locked gh-actions-updater --version 0.2.0"
+run = "\"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""

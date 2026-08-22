@@ -23,8 +23,7 @@ Keep versions synchronized before release.
 - PyPI prereleases use `X.Y.ZrcN`.
 - Do not create a release tag until `cargo package --locked`, npm pack dry-run,
   and Python build validation pass.
-- `0.1.0` was used for registry bootstrap; subsequent proper release work should
-  use a new version such as `0.1.1`.
+- The next minor release is `0.2.0`.
 
 ## Validation
 

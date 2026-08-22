@@ -1,0 +1,124 @@
+name: "Check or update GitHub Actions references"
+description: "Install gau and validate or update GitHub Actions references"
+author: "Na'aman Hirschfeld"
+
+branding:
+  icon: "refresh-cw"
+  color: "green"
+
+inputs:
+  operation:
+    description: "Operation to run: check or update."
+    required: false
+    default: "check"
+  mode:
+    description: "Update selection mode: latest, latest-tag, or latest-hash."
+    required: false
+    default: "latest"
+  path:
+    description: "Repository or workspace path to scan."
+    required: false
+    default: "."
+  recursive:
+    description: "Recursively scan nested repositories and .github directories."
+    required: false
+    default: "false"
+  validate:
+    description: "Validate every reference against its upstream repository or local path."
+    required: false
+    default: "true"
+  missing-ref:
+    description: "Missing reference policy: warn, error, ignore, or fallback."
+    required: false
+    default: "error"
+  version:
+    description: "gau release version, with or without a v prefix; latest resolves the newest release."
+    required: false
+    default: "latest"
+  cache:
+    description: "Cache the installed gau binary."
+    required: false
+    default: "true"
+  github-token:
+    description: "Token for release resolution, downloads, and gau metadata requests."
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  version:
+    description: "Resolved gau version without the v prefix."
+    value: ${{ steps.resolve.outputs.version }}
+  install-dir:
+    description: "Directory containing the installed gau binary."
+    value: ${{ steps.resolve.outputs.install-dir }}
+
+runs:
+  using: "composite"
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        INPUT_CACHE: ${{ inputs.cache }}
+        INPUT_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        case "$INPUT_CACHE" in
+          true|false) ;;
+          *) echo "::error::cache must be true or false" >&2; exit 2 ;;
+        esac
+        version="$INPUT_VERSION"
+        if [ -z "$version" ] || [ "$version" = "latest" ]; then
+          version="$(gh release view --repo Goldziher/gh-actions-updater --json tagName --jq '.tagName')"
+        fi
+        version="${version#v}"
+        if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+          echo "::error::unsupported gau version: $version" >&2
+          exit 2
+        fi
+        install_dir="${RUNNER_TEMP}/gh-actions-updater-v${version}"
+        mkdir -p "$install_dir"
+        {
+          echo "version=$version"
+          echo "install-dir=$install_dir"
+          echo "cache-key=gh-actions-updater-v${version}-${RUNNER_OS}-${RUNNER_ARCH}"
+        } >> "$GITHUB_OUTPUT"
+
+    - id: cache
+      if: inputs.cache == 'true'
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ steps.resolve.outputs.install-dir }}
+        key: ${{ steps.resolve.outputs.cache-key }}
+
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GHAU_INSTALL_DIR: ${{ steps.resolve.outputs.install-dir }}
+      run: bash "${GITHUB_ACTION_PATH}/scripts/install-action.sh" "${{ steps.resolve.outputs.version }}"
+
+    - shell: bash
+      run: echo "${{ steps.resolve.outputs.install-dir }}" >> "$GITHUB_PATH"
+
+    - shell: bash
+      env:
+        GHAU_GITHUB_TOKEN: ${{ inputs.github-token }}
+        INPUT_OPERATION: ${{ inputs.operation }}
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_RECURSIVE: ${{ inputs.recursive }}
+        INPUT_VALIDATE: ${{ inputs.validate }}
+        INPUT_MISSING_REF: ${{ inputs.missing-ref }}
+        GHAU_BIN: ${{ steps.resolve.outputs.install-dir }}/${{ runner.os == 'Windows' && 'gau.exe' || 'gau' }}
+      run: |
+        set -euo pipefail
+        case "$INPUT_OPERATION" in check|update) ;; *) echo "::error::operation must be check or update" >&2; exit 2 ;; esac
+        case "$INPUT_MODE" in latest|latest-tag|latest-hash) ;; *) echo "::error::unsupported mode: $INPUT_MODE" >&2; exit 2 ;; esac
+        case "$INPUT_MISSING_REF" in warn|error|ignore|fallback) ;; *) echo "::error::unsupported missing-ref policy: $INPUT_MISSING_REF" >&2; exit 2 ;; esac
+        case "$INPUT_RECURSIVE" in true|false) ;; *) echo "::error::recursive must be true or false" >&2; exit 2 ;; esac
+        case "$INPUT_VALIDATE" in true|false) ;; *) echo "::error::validate must be true or false" >&2; exit 2 ;; esac
+        args=("--${INPUT_OPERATION}" "--${INPUT_MODE}" "--missing-ref" "$INPUT_MISSING_REF")
+        [ "$INPUT_RECURSIVE" = "true" ] && args+=("--recursive")
+        [ "$INPUT_VALIDATE" = "true" ] && args+=("--validate")
+        "$GHAU_BIN" "${args[@]}" "$INPUT_PATH"

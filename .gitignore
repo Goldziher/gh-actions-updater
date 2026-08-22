@@ -9,6 +9,8 @@
 __pycache__/
 .rumdl_cache/
 
+poly.local.toml
+
 # BEGIN ai-rulez (DO NOT EDIT - managed by ai-rulez)
 .ai-rulez/.generated-manifest.json
 .claude/
@@ -16,4 +18,3 @@ __pycache__/
 AGENTS.md
 CLAUDE.md
 # END ai-rulez
-poly.local.toml

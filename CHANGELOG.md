@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.0] - 2026-08-22
+
+### Added
+
+- Added `--latest`, `--latest-tag`, and `--latest-hash` selection modes; `--latest`
+  preserves whether each reference uses a tag or commit SHA.
+- Added a checksum-verifying composite GitHub Action with explicit `check` and
+  `update` operations.
+- Added separate check/update hooks for pre-commit and Poly. The legacy
+  `gh-actions-updater` pre-commit hook remains an alias for the update behavior.
+
+### Changed
+
+- Metadata failures and intentional skips are collected and reported instead of
+  suppressing unrelated results. JSON output includes structured diagnostic and
+  skip codes plus skipped/failure summary counts.
+- Semver-looking branches, local references, SHA pins, and renamed repositories
+  are resolved without false missing-reference or unsupported-update skips.
+- Stable releases move the `v0` Action tag only after all archives and checksums
+  are present and the GitHub release is published.
+
 ## [0.1.7] - 2026-06-26
 
 ### Fixed

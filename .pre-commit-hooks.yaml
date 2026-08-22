@@ -1,7 +1,24 @@
-- id: gh-actions-updater
-  name: gh-actions-updater
-  description: Autofix GitHub Actions references to available latest-tag updates.
-  entry: gau --update
+- id: gh-actions-updater-check
+  name: gh-actions-updater check
+  description: Validate GitHub Actions references without changing files.
+  entry: gau --latest --check --validate --missing-ref error
   language: rust
   pass_filenames: false
+  always_run: true
+  stages: [pre-commit]
+- id: gh-actions-updater-update
+  name: gh-actions-updater update
+  description: Update GitHub Actions references in place.
+  entry: gau --latest --update --validate --missing-ref error
+  language: rust
+  pass_filenames: false
+  always_run: true
+  stages: [pre-commit]
+- id: gh-actions-updater
+  name: gh-actions-updater (legacy update alias)
+  description: Backward-compatible alias for gh-actions-updater-update.
+  entry: gau --latest --update --validate --missing-ref error
+  language: rust
+  pass_filenames: false
+  always_run: true
   stages: [pre-commit]

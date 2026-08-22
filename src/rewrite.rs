@@ -1,6 +1,6 @@
 use crate::config::Settings;
 use crate::report::UpdateReport;
-use crate::scanner::{ByteSpan, Diagnostic, DiagnosticCategory};
+use crate::scanner::{ByteSpan, Diagnostic, DiagnosticCategory, DiagnosticCode};
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use std::fs;
@@ -40,6 +40,7 @@ pub fn apply_updates(settings: &Settings, updates: &[UpdateReport]) -> Result<Re
                     .rewrite_reason
                     .clone()
                     .unwrap_or_else(|| "update skipped because no safe source span was found".to_string()),
+                code: DiagnosticCode::General,
                 category: DiagnosticCategory::General,
             });
             continue;
@@ -52,6 +53,7 @@ pub fn apply_updates(settings: &Settings, updates: &[UpdateReport]) -> Result<Re
                     .rewrite_reason
                     .clone()
                     .unwrap_or_else(|| "update skipped because the reference is not rewrite-safe".to_string()),
+                code: DiagnosticCode::General,
                 category: DiagnosticCategory::General,
             });
             continue;
@@ -72,6 +74,7 @@ pub fn apply_updates(settings: &Settings, updates: &[UpdateReport]) -> Result<Re
                 file: file.to_string(),
                 line: None,
                 message: "updates skipped because rewrite spans overlap".to_string(),
+                code: DiagnosticCode::General,
                 category: DiagnosticCategory::General,
             });
             continue;
@@ -84,6 +87,7 @@ pub fn apply_updates(settings: &Settings, updates: &[UpdateReport]) -> Result<Re
                     file: file.to_string(),
                     line: Some(replacement.line),
                     message: "update skipped because the source span no longer matches the file".to_string(),
+                    code: DiagnosticCode::General,
                     category: DiagnosticCategory::General,
                 });
             }
@@ -220,7 +224,7 @@ fn diff_path(file: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::apply_updates;
-    use crate::cli::{ColorChoice, MissingRefPolicy, OutputFormat, PinStyle};
+    use crate::cli::{ColorChoice, MissingRefPolicy, OutputFormat, PinStyle, UpdateMode};
     use crate::config::{CacheTtl, Settings};
     use crate::report::UpdateReport;
     use crate::scanner::ByteSpan;
@@ -237,6 +241,7 @@ mod tests {
             cache_enabled: false,
             refresh_cache: false,
             update: !dry_run,
+            update_mode: UpdateMode::LatestTag,
             latest_hash: false,
             pin_style: PinStyle::Preserve,
             update_exclude: Vec::new(),

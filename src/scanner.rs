@@ -53,16 +53,32 @@ pub struct Diagnostic {
     pub file: String,
     pub line: Option<usize>,
     pub message: String,
-    #[serde(skip)]
+    pub code: DiagnosticCode,
     pub category: DiagnosticCategory,
 }
 
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DiagnosticCategory {
     #[default]
     General,
     Schema,
     ScanFailure,
+    Validation,
+    Metadata,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticCode {
+    #[default]
+    General,
+    Schema,
+    ScanFailure,
+    LocalReferenceMissing,
+    LocalReferenceEscapesRepository,
+    RemoteReferenceMissing,
+    MetadataLookupFailed,
 }
 
 #[derive(Debug, Default)]
@@ -88,6 +104,7 @@ pub fn scan_files(paths: &[PathBuf], settings: &Settings) -> Result<ScanOutput> 
                     file: reference.file.clone(),
                     line: Some(reference.line),
                     message: format!("malformed or unsupported uses reference: {}", reference.raw),
+                    code: DiagnosticCode::General,
                     category: DiagnosticCategory::General,
                 });
             }
@@ -128,6 +145,7 @@ fn scan_file(path: &Path, settings: &Settings) -> ScanFileResult {
                     file: path_string,
                     line: None,
                     message: format!("failed to read file: {error}"),
+                    code: DiagnosticCode::ScanFailure,
                     category: DiagnosticCategory::ScanFailure,
                 }),
             };
@@ -146,6 +164,7 @@ fn scan_file(path: &Path, settings: &Settings) -> ScanFileResult {
                     file: path_string,
                     line: None,
                     message: error.to_string(),
+                    code: DiagnosticCode::ScanFailure,
                     category: DiagnosticCategory::ScanFailure,
                 }),
             };
@@ -403,6 +422,7 @@ fn schema_diagnostics(path: &Path, kind: FileKind, content: &str, settings: &Set
             file: path.display().to_string(),
             line: None,
             message: "empty GitHub Actions YAML file".to_string(),
+            code: DiagnosticCode::Schema,
             category: DiagnosticCategory::Schema,
         }];
     }
@@ -415,6 +435,7 @@ fn schema_diagnostics(path: &Path, kind: FileKind, content: &str, settings: &Set
                 file: path.display().to_string(),
                 line: None,
                 message: format!("failed to parse YAML for schema validation: {error}"),
+                code: DiagnosticCode::Schema,
                 category: DiagnosticCategory::Schema,
             });
             return diagnostics;
@@ -431,6 +452,7 @@ fn schema_diagnostics(path: &Path, kind: FileKind, content: &str, settings: &Set
                 file: path.display().to_string(),
                 line: None,
                 message: format!("failed to compile vendored schema: {error}"),
+                code: DiagnosticCode::Schema,
                 category: DiagnosticCategory::Schema,
             });
             return diagnostics;
@@ -441,6 +463,7 @@ fn schema_diagnostics(path: &Path, kind: FileKind, content: &str, settings: &Set
             file: path.display().to_string(),
             line: None,
             message: format!("schema validation failed at {}: {error}", error.instance_path()),
+            code: DiagnosticCode::Schema,
             category: DiagnosticCategory::Schema,
         });
     }
@@ -449,6 +472,7 @@ fn schema_diagnostics(path: &Path, kind: FileKind, content: &str, settings: &Set
             file: path.display().to_string(),
             line: None,
             message: "strict schema validation failed".to_string(),
+            code: DiagnosticCode::Schema,
             category: DiagnosticCategory::Schema,
         });
     }

@@ -55,7 +55,13 @@ pub struct Cli {
     #[arg(long, help = "Rewrite files with available updates")]
     pub update: bool,
 
-    #[arg(long, help = "Pin selected update targets to commit SHAs")]
+    #[arg(long, group = "latest-mode", help = "Preserve each reference's tag or SHA format")]
+    pub latest: bool,
+
+    #[arg(long, group = "latest-mode", help = "Update references to semver tags (default)")]
+    pub latest_tag: bool,
+
+    #[arg(long, group = "latest-mode", help = "Pin selected update targets to commit SHAs")]
     pub latest_hash: bool,
 
     #[arg(long, value_enum, help = "Control how semver refs are formatted")]
@@ -144,6 +150,7 @@ pub enum PinStyle {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum UpdateMode {
+    Latest,
     LatestTag,
     LatestHash,
 }
