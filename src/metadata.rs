@@ -74,7 +74,7 @@ impl<P: TagProvider> TagProvider for MemoizingProvider<'_, P> {
         let result = self
             .provider
             .fetch_tags(owner, repo, etag)
-            .map_err(|error| error.to_string());
+            .map_err(|error| format!("{error:#}"));
         self.tags.borrow_mut().insert(key, result.clone());
         result.map_err(|message| anyhow!(message))
     }
@@ -87,7 +87,7 @@ impl<P: TagProvider> TagProvider for MemoizingProvider<'_, P> {
         let result = self
             .provider
             .fetch_branch(owner, repo, branch, etag)
-            .map_err(|error| error.to_string());
+            .map_err(|error| format!("{error:#}"));
         self.branches.borrow_mut().insert(key, result.clone());
         result.map_err(|message| anyhow!(message))
     }
@@ -100,7 +100,7 @@ impl<P: TagProvider> TagProvider for MemoizingProvider<'_, P> {
         let result = self
             .provider
             .fetch_commit(owner, repo, sha, etag)
-            .map_err(|error| error.to_string());
+            .map_err(|error| format!("{error:#}"));
         self.commits.borrow_mut().insert(key, result.clone());
         result.map_err(|message| anyhow!(message))
     }
@@ -1551,14 +1551,14 @@ fn next_link(link_header: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BranchFetch, CommitFetch, MetadataResolution, RemoteTag, TagFetch, TagProvider, exit_code_for_resolution,
-        parse_ls_remote_tags, resolve_updates_with_provider,
+        BranchFetch, CommitFetch, MemoizingProvider, MetadataResolution, RemoteTag, TagFetch, TagProvider,
+        exit_code_for_resolution, parse_ls_remote_tags, resolve_updates_with_provider,
     };
     use crate::cache::{CacheKeyParts, CacheState, cache_key};
     use crate::cli::{Cli, ColorChoice, MissingRefPolicy, OutputFormat, PinStyle, UpdateMode};
     use crate::config::{CacheTtl, Settings};
     use crate::scanner::{DiagnosticCategory, DiagnosticCode, ReferenceReport, scan_files};
-    use anyhow::Result;
+    use anyhow::{Context, Result};
     use clap::Parser;
     use std::cell::Cell;
     use std::path::Path;
@@ -3093,5 +3093,40 @@ mod tests {
             "expected SHA advisory diagnostic, got {:?}",
             resolution.diagnostics
         );
+    }
+
+    #[test]
+    fn memoized_commit_error_preserves_source_chain() {
+        struct RateLimitedProvider {
+            calls: Cell<usize>,
+        }
+
+        impl TagProvider for RateLimitedProvider {
+            fn fetch_tags(&self, _owner: &str, _repo: &str, _etag: Option<&str>) -> Result<TagFetch> {
+                unreachable!("this test only exercises commit lookups")
+            }
+
+            fn fetch_commit(&self, owner: &str, repo: &str, sha: &str, _etag: Option<&str>) -> Result<CommitFetch> {
+                self.calls.set(self.calls.get() + 1);
+                Err(anyhow::anyhow!("HTTP status 403: API rate limit exceeded"))
+                    .with_context(|| format!("GitHub REST commit lookup failed for {owner}/{repo}@{sha}"))
+            }
+        }
+
+        let provider = RateLimitedProvider { calls: Cell::new(0) };
+        let memoized = MemoizingProvider::new(&provider);
+        let expected_message = "GitHub REST commit lookup failed for actions/checkout@deadbeef: \
+                                HTTP status 403: API rate limit exceeded";
+
+        let first_error = memoized
+            .fetch_commit("actions", "checkout", "deadbeef", None)
+            .expect_err("commit lookup should fail");
+        let second_error = memoized
+            .fetch_commit("actions", "checkout", "deadbeef", None)
+            .expect_err("cached commit lookup should fail");
+
+        assert_eq!(format!("{first_error:#}"), expected_message);
+        assert_eq!(format!("{second_error:#}"), expected_message);
+        assert_eq!(provider.calls.get(), 1, "the failed lookup should be memoized");
     }
 }
