@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.2] - 2026-08-23
+
+### Fixed
+
+- Zero-config scans now report newer major action releases. Set
+  `preserve_major = true` to retain the previous same-major policy.
+
 ## [0.2.1] - 2026-08-23
 
 ### Fixed

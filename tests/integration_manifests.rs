@@ -98,7 +98,7 @@ fn should_expose_semantic_check_and_update_poly_hooks() {
         assert!(cargo.run.ends_with("/bin/gau\""));
         assert_eq!(
             cargo.install.as_deref(),
-            Some("cargo install --locked gh-actions-updater --version 0.2.1")
+            Some("cargo install --locked gh-actions-updater --version 0.2.2")
         );
     }
 }
