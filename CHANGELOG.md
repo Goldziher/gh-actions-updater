@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.1] - 2026-08-23
+
+### Fixed
+
+- `preserve_major = false` now allows tag and hash update modes to select newer
+  major versions, including floating refs such as `actions/checkout@v3`.
+
 ## [0.2.0] - 2026-08-22
 
 ### Added

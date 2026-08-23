@@ -14,7 +14,7 @@ run = "gau"
 [[hooks.paths]]
 channel = "cargo"
 check = "test -x \"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
-install = "cargo install --locked gh-actions-updater --version 0.2.0"
+install = "cargo install --locked gh-actions-updater --version 0.2.1"
 run = "\"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
 
 [[hooks]]
@@ -31,5 +31,5 @@ run = "gau"
 [[hooks.paths]]
 channel = "cargo"
 check = "test -x \"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
-install = "cargo install --locked gh-actions-updater --version 0.2.0"
+install = "cargo install --locked gh-actions-updater --version 0.2.1"
 run = "\"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
