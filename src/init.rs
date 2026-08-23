@@ -23,7 +23,7 @@ mode = "latest-tag"
 pin_style = "preserve"
 exclude = []
 include_prereleases = false
-preserve_major = true
+preserve_major = false
 missing_ref = "warn"
 
 [output]

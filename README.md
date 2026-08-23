@@ -131,7 +131,7 @@ mode = "latest-tag"
 pin_style = "preserve"
 exclude = []
 include_prereleases = false
-preserve_major = true
+preserve_major = false
 missing_ref = "warn"
 
 [output]
@@ -172,8 +172,9 @@ Supported `uses:` locations:
 
 Default mode is `latest-tag`. `--latest` preserves the current representation:
 tag pins update to compatible tags and SHA pins update to SHAs. `--latest-hash`
-selects the compatible release and pins its commit SHA. Semver-like refs update within the current major
-version by default. `pin_style = "preserve"` keeps the current precision:
+selects the latest release across major versions and pins its commit SHA. Set
+`preserve_major = true` to restrict semantic-version updates to the current
+major. `pin_style = "preserve"` keeps the current precision:
 `@v4` stays a major floating pin, `@v4.1` stays a minor floating pin, and
 `@v4.1.0` updates to full compatible tags. Use `--pin-style major`, `minor`, or
 `full` to intentionally convert between styles. Reusable workflows such as

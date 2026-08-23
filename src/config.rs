@@ -232,7 +232,7 @@ impl Settings {
                 .or(file_config.update.missing_ref)
                 .unwrap_or(MissingRefPolicy::Warn),
             include_prereleases: file_config.update.include_prereleases.unwrap_or(false),
-            preserve_major: file_config.update.preserve_major.unwrap_or(true),
+            preserve_major: file_config.update.preserve_major.unwrap_or(false),
             check: cli.check,
             dry_run: cli.dry_run || cli.check || !cli.update,
             diff: cli.diff,
@@ -349,8 +349,21 @@ mod tests {
         assert!(!settings.cache_enabled);
         assert_eq!(settings.missing_ref, MissingRefPolicy::Error);
         assert_eq!(settings.pin_style, PinStyle::Preserve);
+        assert!(!settings.preserve_major);
         assert_eq!(settings.format, OutputFormat::Json);
         assert_eq!(settings.color, ColorChoice::Never);
+    }
+
+    #[test]
+    fn config_can_enable_major_preservation() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = temp.path().join(".gh-actions-updater.toml");
+        std::fs::write(&config, "[update]\npreserve_major = true\n").unwrap();
+
+        let cli = Cli::parse_from(["gh-actions-updater", "--config", config.to_str().unwrap()]);
+        let settings = Settings::resolve(&cli).unwrap();
+
+        assert!(settings.preserve_major);
     }
 
     #[test]

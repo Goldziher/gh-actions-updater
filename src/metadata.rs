@@ -1555,10 +1555,11 @@ mod tests {
         parse_ls_remote_tags, resolve_updates_with_provider,
     };
     use crate::cache::{CacheKeyParts, CacheState, cache_key};
-    use crate::cli::{ColorChoice, MissingRefPolicy, OutputFormat, PinStyle, UpdateMode};
+    use crate::cli::{Cli, ColorChoice, MissingRefPolicy, OutputFormat, PinStyle, UpdateMode};
     use crate::config::{CacheTtl, Settings};
     use crate::scanner::{DiagnosticCategory, DiagnosticCode, ReferenceReport, scan_files};
     use anyhow::Result;
+    use clap::Parser;
     use std::cell::Cell;
     use std::path::Path;
 
@@ -1820,6 +1821,39 @@ mod tests {
 
         assert!(resolution.updates.is_empty());
         assert_eq!(provider.calls.get(), 1);
+    }
+
+    #[test]
+    fn default_settings_report_newer_major_action_tags() {
+        let cases = [
+            ("actions/checkout@v3", "v5"),
+            ("actions/setup-node@v2", "v6"),
+            ("actions/cache@v3", "v4"),
+        ];
+
+        for (current, expected) in cases {
+            let temp = tempfile::tempdir().unwrap();
+            let cli = Cli::parse_from(["gau", temp.path().to_str().unwrap()]);
+            let mut settings = Settings::resolve(&cli).unwrap();
+            settings.cache_dir = temp.path().join(".cache");
+            settings.cache_enabled = false;
+            let provider = FakeProvider {
+                tags: vec![tag(current.rsplit_once('@').unwrap().1), tag(expected)],
+                calls: Cell::new(0),
+            };
+
+            let resolution = resolve_updates_with_provider(
+                &settings,
+                CacheState::prepare(&settings).unwrap(),
+                &[reference(current)],
+                &provider,
+            )
+            .unwrap();
+
+            assert_eq!(resolution.updates.len(), 1, "expected an update for {current}");
+            assert_eq!(resolution.updates[0].target.as_deref(), Some(expected));
+            assert_eq!(provider.calls.get(), 1);
+        }
     }
 
     #[test]

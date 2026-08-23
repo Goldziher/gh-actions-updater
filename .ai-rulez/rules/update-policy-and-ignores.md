@@ -10,7 +10,9 @@ same as rewriting it.
 ## Default Update Policy
 
 - Latest-tag mode is the default.
-- Preserve the current major version for semver-like refs.
+- Select the latest semantic version across majors by default.
+- Allow users to opt into preserving the current major version with
+  `preserve_major = true`.
 - Ignore prereleases unless configured.
 - Reusable workflow refs follow the same tag/hash policy as action refs.
 - `--latest-tag` is the default and selects compatible semantic-version tags.

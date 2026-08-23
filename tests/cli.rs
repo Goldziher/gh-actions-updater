@@ -88,6 +88,7 @@ fn init_writes_config_and_requires_force_for_overwrite() {
     assert!(content.contains("[scan]"));
     assert!(content.contains("recursive = false"));
     assert!(content.contains("pin_style = \"preserve\""));
+    assert!(content.contains("preserve_major = false"));
 
     let output = Command::new(binary())
         .arg("--init")

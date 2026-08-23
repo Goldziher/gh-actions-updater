@@ -68,7 +68,8 @@ Supported classifications:
 Update semantics:
 
 - latest tag is the default target
-- semver-like tags preserve the current major version by default
+- semver-like tags select the latest version across majors by default
+- `preserve_major = true` restricts selection to the current major
 - semver-like tag formatting is preserved by default: major floats stay major
   floats, minor floats stay minor floats, and full tags stay full tags
 - `--pin-style major`, `minor`, or `full` explicitly converts semver-like refs
@@ -92,9 +93,8 @@ Missing-ref policy values:
 
 The default is `warn`. The latest-tag resolver enforces this policy for tag refs
 only. The latest-hash resolver checks unmatched SHA refs through commit
-metadata, and SHA refs that map to known semver tags preserve their major
-version. SHA refs that do not map to a known semver tag require
-`preserve_major = false` before the resolver can select the latest semver tag.
+metadata. SHA refs select the latest semver tag across majors unless
+`preserve_major = true` restricts selection to their mapped major.
 The updater must not silently rewrite a deleted tag unless the effective policy
 is `fallback`.
 
