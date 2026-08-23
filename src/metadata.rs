@@ -1229,7 +1229,11 @@ fn select_tag_update_target(
         });
     };
     let current_exists = tags.iter().any(|tag| tag.name == current);
-    if current_exists && settings.pin_style == PinStyle::Preserve && current_ref.precision != VersionPrecision::Full {
+    if settings.preserve_major
+        && current_exists
+        && settings.pin_style == PinStyle::Preserve
+        && current_ref.precision != VersionPrecision::Full
+    {
         return Ok(TargetDecision {
             target: tags.iter().find(|tag| tag.name == current).cloned(),
             current_missing: false,
@@ -1398,7 +1402,7 @@ fn select_hash_update_target(
 fn latest_semver_tag(settings: &Settings, tags: &[RemoteTag], major: Option<u64>) -> Option<RemoteTag> {
     tags.iter()
         .filter_map(|tag| parse_version_tag(&tag.name).map(|version| (tag, version)))
-        .filter(|(_, version)| major.is_none_or(|major| version.major == major))
+        .filter(|(_, version)| !settings.preserve_major || major.is_none_or(|major| version.major == major))
         .filter(|(_, version)| settings.include_prereleases || version.pre.is_empty())
         .max_by(|(_, left), (_, right)| left.cmp(right))
         .map(|(tag, _)| tag.clone())
@@ -1553,7 +1557,7 @@ mod tests {
     use crate::cache::{CacheKeyParts, CacheState, cache_key};
     use crate::cli::{ColorChoice, MissingRefPolicy, OutputFormat, PinStyle, UpdateMode};
     use crate::config::{CacheTtl, Settings};
-    use crate::scanner::{DiagnosticCategory, DiagnosticCode, ReferenceReport};
+    use crate::scanner::{DiagnosticCategory, DiagnosticCode, ReferenceReport, scan_files};
     use anyhow::Result;
     use std::cell::Cell;
     use std::path::Path;
@@ -1816,6 +1820,38 @@ mod tests {
 
         assert!(resolution.updates.is_empty());
         assert_eq!(provider.calls.get(), 1);
+    }
+
+    #[test]
+    fn reports_update_for_major_only_workflow_ref_when_major_preservation_is_disabled() {
+        let temp = tempfile::tempdir().unwrap();
+        let workflow = temp.path().join(".github/workflows/ci.yml");
+        std::fs::create_dir_all(workflow.parent().unwrap()).unwrap();
+        std::fs::write(
+            &workflow,
+            "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v3\n",
+        )
+        .unwrap();
+        let mut settings = settings(temp.path());
+        settings.preserve_major = false;
+        let scan = scan_files(&[workflow], &settings).unwrap();
+        let provider = FakeProvider {
+            tags: vec![tag("v3"), tag("v4")],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &scan.references,
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(scan.references.len(), 1);
+        assert_eq!(scan.references[0].raw, "actions/checkout@v3");
+        assert_eq!(resolution.updates.len(), 1);
+        assert_eq!(resolution.updates[0].target.as_deref(), Some("v4"));
     }
 
     #[test]
@@ -2117,6 +2153,34 @@ mod tests {
     }
 
     #[test]
+    fn latest_hash_crosses_majors_for_tag_when_major_preservation_is_disabled() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.latest_hash = true;
+        settings.preserve_major = false;
+        let provider = FakeProvider {
+            tags: vec![
+                tag_with_sha("v3", "3333333333333333333333333333333333333333"),
+                tag_with_sha("v4", "4444444444444444444444444444444444444444"),
+            ],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("actions/checkout@v3")],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolution.updates[0].target.as_deref(),
+            Some("4444444444444444444444444444444444444444")
+        );
+    }
+
+    #[test]
     fn latest_hash_updates_sha_by_matching_tag_major() {
         let temp = tempfile::tempdir().unwrap();
         let mut settings = settings(temp.path());
@@ -2141,6 +2205,34 @@ mod tests {
         assert_eq!(
             resolution.updates[0].target.as_deref(),
             Some("2222222222222222222222222222222222222222")
+        );
+    }
+
+    #[test]
+    fn latest_hash_crosses_majors_for_sha_when_major_preservation_is_disabled() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.latest_hash = true;
+        settings.preserve_major = false;
+        let provider = FakeProvider {
+            tags: vec![
+                tag_with_sha("v3", "3333333333333333333333333333333333333333"),
+                tag_with_sha("v4", "4444444444444444444444444444444444444444"),
+            ],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("actions/checkout@3333333333333333333333333333333333333333")],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolution.updates[0].target.as_deref(),
+            Some("4444444444444444444444444444444444444444")
         );
     }
 
