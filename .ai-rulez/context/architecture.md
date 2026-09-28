@@ -5,11 +5,12 @@ priority: high
 # Project Architecture
 
 `gh-actions-updater` is a Rust 2024 CLI package. The installed user command is
-`gau`.
+`gau`, with a `ghau` alias for shells where `gau` is already taken.
 
 ## Core Modules
 
-- `src/main.rs` — process entry point.
+- `src/main.rs` — process entry point for `gau`.
+- `src/bin/ghau.rs` — entry point for the `ghau` alias.
 - `src/lib.rs` — top-level run orchestration and exit-code handling.
 - `src/cli.rs` — clap flag surface for scan/update/init modes.
 - `src/config.rs` — config discovery, env/CLI precedence, TTL parsing.
@@ -25,9 +26,9 @@ priority: high
 ## Distribution
 
 - Cargo package name: `gh-actions-updater`.
-- Installed binary: `gau`.
-- `npm-package/` — npm wrapper package named `gh-actions-updater`; exposes `gau`.
-- `pip-package/` — PyPI wrapper package named `gh-actions-updater`; exposes `gau`.
+- Installed binaries: `gau` and its `ghau` alias.
+- `npm-package/` — npm wrapper package named `gh-actions-updater`; exposes `gau` and `ghau`.
+- `pip-package/` — PyPI wrapper package named `gh-actions-updater`; exposes `gau` and `ghau`.
 - `.goreleaser.yaml` — release archives and Homebrew formula generation.
 - `.github/workflows/ci.yaml` — quality gates.
 - `.github/workflows/publish.yaml` — crates.io, GitHub release assets, Homebrew bottles, npm, and PyPI.

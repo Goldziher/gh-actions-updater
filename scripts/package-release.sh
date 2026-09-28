@@ -54,6 +54,12 @@ cp README.md "$STAGING_DIR/"
 cp LICENSE "$STAGING_DIR/"
 cp .pre-commit-hooks.yaml "$STAGING_DIR/"
 
+if [ "$SYSTEM" = "windows" ]; then
+  cp "$BINARY_PATH" "$STAGING_DIR/ghau${BINEXT}"
+else
+  ln -sf "gau${BINEXT}" "$STAGING_DIR/ghau${BINEXT}"
+fi
+
 chmod +x "$STAGING_DIR/gau${BINEXT}"
 
 case "$SYSTEM" in

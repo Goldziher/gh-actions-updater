@@ -39,6 +39,7 @@ Issues = "https://github.com/Goldziher/gh-actions-updater/issues"
 
 [project.scripts]
 gau = "gh_actions_updater.cli:main"
+ghau = "gh_actions_updater.cli:main"
 
 [tool.setuptools]
 packages = ["gh_actions_updater"]

@@ -63,3 +63,9 @@ temporary_binary="${destination}.tmp.$$"
 cp "$binary" "$temporary_binary"
 chmod +x "$temporary_binary"
 mv "$temporary_binary" "$destination"
+
+if [ "$target" = "x86_64-pc-windows-gnu" ]; then
+  cp "$destination" "${install_dir}/ghau.exe"
+else
+  ln -sf gau "${install_dir}/ghau"
+fi

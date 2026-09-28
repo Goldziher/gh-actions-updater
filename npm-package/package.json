@@ -4,7 +4,8 @@
   "description": "Fast GitHub Actions reference scanner and updater",
   "main": "index.js",
   "bin": {
-    "gau": "bin/gau"
+    "gau": "bin/gau",
+    "ghau": "bin/gau"
   },
   "scripts": {
     "postinstall": "node install.js"

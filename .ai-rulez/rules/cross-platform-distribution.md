@@ -4,7 +4,9 @@ priority: high
 
 # Cross-Platform Distribution
 
-Package names stay `gh-actions-updater`; the installed command is `gau`.
+Package names stay `gh-actions-updater`; the installed command is `gau`, with a
+`ghau` alias for shells where `gau` is already taken (for example the oh-my-zsh
+`gau` alias for `git add --update`).
 
 ## Channels
 
@@ -15,7 +17,7 @@ Package names stay `gh-actions-updater`; the installed command is `gau`.
 - GitHub release archives built by GoReleaser
 
 Do not add a compatibility `gh-actions-updater` binary unless explicitly
-requested. Wrapper packages should expose only `gau`.
+requested. Wrapper packages expose `gau` and the `ghau` alias, nothing else.
 
 ## Release Assets
 
@@ -43,8 +45,11 @@ Homebrew bottles are produced by the `Goldziher/homebrew-tap` bottle workflow.
 
 ## Wrapper Rules
 
-- npm `bin` exposes `gau`.
-- PyPI console scripts expose `gau`.
+- npm `bin` exposes `gau` and `ghau` (both point at the same wrapper).
+- PyPI console scripts expose `gau` and `ghau`.
+- Cargo installs `gau` and `ghau` from the same sources.
+- Release archives contain `gau` and a `ghau` alias (symlink on Unix, copy on
+  Windows); the Action installer materializes `ghau` next to `gau`.
 - Wrappers download from GitHub Releases and verify checksums.
 - `GH_ACTIONS_UPDATER_BINARY` may override the Python wrapper binary path.
 - Test wrapper syntax and packaging whenever wrapper code changes.
