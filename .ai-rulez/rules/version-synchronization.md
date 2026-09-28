@@ -23,7 +23,7 @@ Keep versions synchronized before release.
 - PyPI prereleases use `X.Y.ZrcN`.
 - Do not create a release tag until `cargo package --locked`, npm pack dry-run,
   and Python build validation pass.
-- The next minor release is `0.2.0`.
+- The next minor release is `0.4.0`.
 
 ## Validation
 

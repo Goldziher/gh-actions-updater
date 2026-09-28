@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented here.
 
+## [0.3.0] - 2026-09-28
+
+### Added
+
+- Added a `ghau` command alias alongside `gau` for shells where `gau` is already
+  taken. Cargo, npm, PyPI, release archives, and the composite Action all expose
+  both names.
+- `--latest-tag` with `--pin-style major`, `minor`, or `full` now converts SHA
+  pins back to tags, the inverse of `--latest-hash`.
+
+### Fixed
+
+- `--pin-style major|minor|full` now reformats a reference that already points at
+  the latest release (for example `@v7.0.1` becomes `@v7`) instead of leaving it
+  untouched.
+- `--pin-style major|minor|full` falls back to the concrete release tag when the
+  requested floating tag does not exist upstream, rather than dropping the
+  update.
+- SHA pins in `--latest` and `--latest-hash` modes now refresh a stale trailing
+  `# vN` version comment to the release the new pin tracks, preserving the
+  comment's precision.
+
 ## [0.2.2] - 2026-08-23
 
 ### Fixed
