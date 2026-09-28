@@ -76,6 +76,10 @@ fn should_expose_semantic_check_and_update_poly_hooks() {
     assert_eq!(manifest.version, 1);
     assert_eq!(manifest.hooks.len(), 2);
 
+    let cargo_toml = fs::read_to_string(repository_root().join("Cargo.toml")).unwrap();
+    let cargo_toml: toml::Value = toml::from_str(&cargo_toml).unwrap();
+    let version = cargo_toml["package"]["version"].as_str().unwrap();
+
     for (expected_id, expected_arguments) in [
         ("gh-actions-updater-check", CHECK_ARGUMENTS),
         ("gh-actions-updater-update", UPDATE_ARGUMENTS),
@@ -94,11 +98,11 @@ fn should_expose_semantic_check_and_update_poly_hooks() {
         assert_eq!(system.run, "gau");
         assert_eq!(system.install, None);
 
-        let cargo = hook.paths.iter().find(|path| path.channel == "cargo").unwrap();
-        assert!(cargo.run.ends_with("/bin/gau\""));
+        let cargo_path = hook.paths.iter().find(|path| path.channel == "cargo").unwrap();
+        assert!(cargo_path.run.ends_with("/bin/gau\""));
         assert_eq!(
-            cargo.install.as_deref(),
-            Some("cargo install --locked gh-actions-updater --version 0.2.2")
+            cargo_path.install.as_deref(),
+            Some(format!("cargo install --locked gh-actions-updater --version {version}").as_str())
         );
     }
 }
@@ -145,7 +149,7 @@ fn should_expose_bounded_validation_gate_github_action() {
         .expect("missing cache step");
     assert_eq!(
         yaml_string(cache_step, "uses"),
-        "actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830"
+        "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
     );
     let installer_step = steps
         .iter()
