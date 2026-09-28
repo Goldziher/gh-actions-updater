@@ -15,9 +15,9 @@ brew install gh-actions-updater
 # Cargo
 cargo install gh-actions-updater
 
-# npm
-npm install -g gh-actions-updater
-npx -y gh-actions-updater@latest --help
+# pnpm
+pnpm add -g gh-actions-updater
+pnpm dlx gh-actions-updater@latest --help
 
 # PyPI
 pip install gh-actions-updater

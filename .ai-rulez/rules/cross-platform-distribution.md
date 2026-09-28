@@ -50,6 +50,9 @@ Homebrew bottles are produced by the `Goldziher/homebrew-tap` bottle workflow.
 - Cargo installs `gau` and `ghau` from the same sources.
 - Release archives contain `gau` and a `ghau` alias (symlink on Unix, copy on
   Windows); the Action installer materializes `ghau` next to `gau`.
+- The npm wrapper is built and published with pnpm 12; `npm-package/package.json`
+  pins `packageManager` and CI/publish use `pnpm install --frozen-lockfile` and
+  `pnpm publish`.
 - Wrappers download from GitHub Releases and verify checksums.
 - `GH_ACTIONS_UPDATER_BINARY` may override the Python wrapper binary path.
 - Test wrapper syntax and packaging whenever wrapper code changes.

@@ -8,7 +8,7 @@ priority: high
 
 - Rust 1.85+ with edition 2024 support.
 - Cargo and rustfmt/clippy.
-- Node.js 20+ for the npm wrapper.
+- Node.js 18+ and pnpm 12 for the npm wrapper.
 - Python 3.11+ for PyPI wrapper validation.
 - GoReleaser for release-config checks.
 - `jq`, `gh`, and npm auth for release/publish smoke work.
@@ -40,7 +40,7 @@ The package installs `gau`; do not assume a `gh-actions-updater` binary exists.
 node --check npm-package/index.js
 node --check npm-package/install.js
 node --check npm-package/bin/gau
-npm pack --dry-run --cache /tmp/ghau-npm-cache
+(cd npm-package && pnpm install --frozen-lockfile --ignore-scripts && pnpm pack --dry-run)
 
 python3 -m compileall pip-package/gh_actions_updater
 python3 -m build pip-package --outdir /tmp/ghau-pip-dist

@@ -97,5 +97,6 @@ tasks:
       - |
         set -euo pipefail
         cd npm-package
-        npm pack --dry-run --cache /tmp/ghau-npm-cache
+        pnpm install --frozen-lockfile --ignore-scripts
+        pnpm pack --dry-run
       - python3 -m compileall pip-package/gh_actions_updater

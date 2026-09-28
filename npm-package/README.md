@@ -1,17 +1,17 @@
 # gh-actions-updater
 
-npm package for the `gau` Rust CLI.
+pnpm package for the `gau` Rust CLI.
 
 ```bash
-npm install -g gh-actions-updater
+pnpm add -g gh-actions-updater
 gau --help
 ```
 
 Run without installing globally:
 
 ```bash
-npx -y gh-actions-updater@latest --check .
-npx -y gh-actions-updater@latest --init
+pnpm dlx gh-actions-updater@latest --check .
+pnpm dlx gh-actions-updater@latest --init
 ```
 
 Common usage:
@@ -27,10 +27,10 @@ gau --pin-style major --update .
 gau -r ~/workspace --check
 ```
 
-The package name is `gh-actions-updater`; the installed command is `gau`.
-The postinstall script downloads the matching `gau` binary from GitHub Releases,
-verifies the release checksum, and stores it in the package vendor directory.
-No platform binaries are checked into the npm package.
+The package name is `gh-actions-updater`; the installed commands are `gau` and
+the `ghau` alias. The postinstall script downloads the matching `gau` binary from
+GitHub Releases, verifies the release checksum, and stores it in the package
+vendor directory. No platform binaries are checked into the package.
 
 Configuration lives in `.gh-actions-updater.toml`. Generate one with:
 

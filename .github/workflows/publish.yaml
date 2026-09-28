@@ -41,6 +41,11 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: "12.6.0"
+
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
@@ -117,7 +122,7 @@ jobs:
           fi
 
           npm_exists=false
-          if npm view "gh-actions-updater@${version}" version >/dev/null 2>&1; then
+          if pnpm view "gh-actions-updater@${version}" version >/dev/null 2>&1; then
             npm_exists=true
           fi
 
@@ -432,11 +437,18 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: "12.6.0"
+
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
+          cache: "pnpm"
+          cache-dependency-path: npm-package/pnpm-lock.yaml
 
       - name: Publish to npm
         run: |
@@ -449,7 +461,7 @@ jobs:
             npm_tag="latest"
           fi
 
-          npm publish --provenance --access public --tag "$npm_tag"
+          pnpm publish --provenance --access public --tag "$npm_tag" --no-git-checks
 
   publish_pypi:
     name: Publish PyPI
