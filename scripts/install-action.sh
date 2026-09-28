@@ -27,8 +27,8 @@ temporary_dir="$(mktemp -d)"
 trap 'rm -rf "$temporary_dir"' EXIT
 auth_header=()
 [ -n "${GH_TOKEN:-}" ] && auth_header=(-H "Authorization: Bearer ${GH_TOKEN}")
-curl --fail --silent --show-error --location "${auth_header[@]}" "${base_url}/${archive}" -o "${temporary_dir}/${archive}"
-curl --fail --silent --show-error --location "${auth_header[@]}" "${base_url}/checksums.txt" -o "${temporary_dir}/checksums.txt"
+curl --fail --silent --show-error --location ${auth_header[@]+"${auth_header[@]}"} "${base_url}/${archive}" -o "${temporary_dir}/${archive}"
+curl --fail --silent --show-error --location ${auth_header[@]+"${auth_header[@]}"} "${base_url}/checksums.txt" -o "${temporary_dir}/checksums.txt"
 
 expected="$(awk -v archive="$archive" '$2 == archive || $2 == "*" archive { print $1; exit }' "${temporary_dir}/checksums.txt")"
 [ -n "$expected" ] || {
