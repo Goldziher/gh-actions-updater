@@ -10,7 +10,6 @@ allow = [
   "ISC",
   "Zlib",
   "Unicode-3.0",
-  "Unicode-DFS-2016",
   "Unlicense",
   "CC0-1.0",
   "CDLA-Permissive-2.0",
@@ -18,3 +17,13 @@ allow = [
 confidence-threshold = 0.8
 
 exceptions = [{ allow = ["MPL-2.0"], crate = "option-ext" }, { allow = ["LGPL-2.1-or-later"], crate = "r-efi" }]
+
+[bans]
+# Duplicate versions pulled in by transitive dependencies we do not control:
+# ring pins getrandom 0.2 and windows-sys 0.52, while ahash/clap pull newer
+# major lines. Nothing here is actionable from this crate.
+skip = [
+  { name = "getrandom", version = "=0.2.17" },
+  { name = "syn", version = "=2.0.119" },
+  { name = "windows-sys", version = "=0.52.0" },
+]

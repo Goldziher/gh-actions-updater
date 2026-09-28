@@ -137,6 +137,15 @@ enabled = true
 "crates/*-ffi/include/*.h" = ["comment", "doc-comment"]
 "packages/go/include/*.h" = ["comment", "doc-comment"]
 "Package.swift" = ["comment", "doc-comment"]
+# Pre-existing quality-tier debt, kept visible in one place rather than
+# silenced globally. Refactoring these modules is tracked separately.
+"src/metadata.rs" = ["file-too-long", "function-too-long", "nesting-too-deep", "cyclomatic-complexity"]
+"src/config.rs" = ["function-too-long"]
+"src/lib.rs" = ["function-too-long"]
+"src/report.rs" = ["function-too-long"]
+"src/rewrite.rs" = ["function-too-long"]
+# Vendored SchemaStore schemas: line counts are not ours to control.
+"src/schemas/**" = ["file-too-long"]
 [[hooks.sources]]
 id = "ai-rulez"
 git = "https://github.com/Goldziher/ai-rulez.git"
