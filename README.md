@@ -24,7 +24,9 @@ pip install gh-actions-updater
 uvx --from gh-actions-updater gau --help
 ```
 
-All package managers install the `gau` command.
+All package managers install the `gau` command, plus a `ghau` alias for shells
+where `gau` is already taken (for example the oh-my-zsh `gau` alias for
+`git add --update`). Both commands are the same binary.
 
 ## Usage
 
@@ -179,6 +181,20 @@ major. `pin_style = "preserve"` keeps the current precision:
 `@v4.1.0` updates to full compatible tags. Use `--pin-style major`, `minor`, or
 `full` to intentionally convert between styles. Reusable workflows such as
 `owner/repo/.github/workflows/reusable.yml@v1` follow the same tag/hash policy.
+
+An explicit `--pin-style` is a conversion request, so it also reformats a ref
+that already points at the latest release (`@v7.0.1` becomes `@v7` under
+`--pin-style major`), and when the requested floating tag does not exist
+upstream it falls back to the concrete release tag instead of dropping the
+update (`@v6` whose latest release is `v10.1.0` with no `v10` tag becomes
+`@v10.1.0`).
+
+`--latest-tag` combined with `--pin-style major`, `minor`, or `full` also
+converts SHA pins back to tags — the inverse of `--latest-hash`. A bare trailing
+`# vN` version comment is dropped when the ref becomes a tag, and a stale
+version comment on a SHA pin is refreshed to the release the new pin tracks,
+preserving the comment's own precision (`# v6` becomes `# v7` when the pin moves
+to `v7.0.1`).
 
 Branch refs such as `@main`, Docker image refs, local actions, local reusable
 workflows, immutable SHAs, and non-semver tag sets are reported but not updated

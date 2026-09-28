@@ -2,7 +2,7 @@ use crate::action_ref::{RefKind, ReferenceKind};
 use crate::cache::{CacheKeyParts, CacheLookup, CacheReport, CacheState, cache_key};
 use crate::cli::{MissingRefPolicy, PinStyle, UpdateMode};
 use crate::config::Settings;
-use crate::report::UpdateReport;
+use crate::report::{CommentRewrite, UpdateReport};
 use crate::scanner::{Diagnostic, DiagnosticCategory, DiagnosticCode, ReferenceReport};
 use ahash::AHashMap;
 use anyhow::{Context, Result, anyhow};
@@ -607,6 +607,9 @@ pub fn resolve_updates_with_provider(
 
         let use_hash = mode_uses_hash(settings, &effective_ref_kind);
         let sha_advisory = !use_hash && !settings.pin_floating_to_sha && effective_ref_kind == RefKind::Sha;
+        // An explicit pin style turns a SHA pin into a tag target under
+        // `--latest-tag`, the only path back from SHAs to tags.
+        let sha_to_tag = sha_advisory && settings.pin_style != PinStyle::Preserve;
 
         let semver_update = !sha_advisory
             && (matches!(effective_ref_kind, RefKind::SemverLikeTag)
@@ -632,6 +635,46 @@ pub fn resolve_updates_with_provider(
                     ref_span: reference.ref_span,
                     rewrite_supported: reference.rewrite_supported,
                     rewrite_reason: reference.rewrite_reason.clone(),
+                    comment: None,
+                });
+            }
+            continue;
+        }
+
+        if sha_to_tag {
+            let decision = match select_sha_to_tag_target(settings, &mut cache, provider, reference, current, tags) {
+                Ok(decision) => decision,
+                Err(error) => {
+                    push_metadata_failure(reference, &error, &mut diagnostics);
+                    has_metadata_failures = true;
+                    continue;
+                }
+            };
+            if let Some(target) = decision.target {
+                if target.name != current {
+                    let comment = comment_rewrite(reference, &target, true);
+                    updates.push(UpdateReport {
+                        file: reference.file.clone(),
+                        line: reference.line,
+                        current: current.to_string(),
+                        target: Some(target.name),
+                        ref_span: reference.ref_span,
+                        rewrite_supported: reference.rewrite_supported,
+                        rewrite_reason: reference.rewrite_reason.clone(),
+                        comment,
+                    });
+                }
+            }
+            if decision.current_missing {
+                handle_missing_ref(settings, reference, &mut diagnostics)?;
+            }
+            if let Some(message) = decision.diagnostic {
+                diagnostics.push(Diagnostic {
+                    file: reference.file.clone(),
+                    line: Some(reference.line),
+                    message,
+                    code: DiagnosticCode::General,
+                    category: DiagnosticCategory::General,
                 });
             }
             continue;
@@ -720,7 +763,11 @@ pub fn resolve_updates_with_provider(
             continue;
         };
 
-        let target_ref = if use_hash { target.sha } else { target.name };
+        let target_ref = if use_hash {
+            target.sha.clone()
+        } else {
+            target.name.clone()
+        };
 
         if target_ref != current && (!decision.current_missing || settings.missing_ref == MissingRefPolicy::Fallback) {
             if decision.current_missing && settings.missing_ref == MissingRefPolicy::Fallback {
@@ -730,6 +777,11 @@ pub fn resolve_updates_with_provider(
                         || diagnostic.line != Some(reference.line)
                 });
             }
+            let comment = if use_hash {
+                comment_rewrite(reference, &target, false)
+            } else {
+                None
+            };
             updates.push(UpdateReport {
                 file: reference.file.clone(),
                 line: reference.line,
@@ -738,6 +790,7 @@ pub fn resolve_updates_with_provider(
                 ref_span: reference.ref_span,
                 rewrite_supported: reference.rewrite_supported,
                 rewrite_reason: reference.rewrite_reason.clone(),
+                comment,
             });
         } else if let Some(message) = decision.diagnostic {
             diagnostics.push(Diagnostic {
@@ -1229,11 +1282,8 @@ fn select_tag_update_target(
         });
     };
     let current_exists = tags.iter().any(|tag| tag.name == current);
-    if settings.preserve_major
-        && current_exists
-        && settings.pin_style == PinStyle::Preserve
-        && current_ref.precision != VersionPrecision::Full
-    {
+    let converting = settings.pin_style != PinStyle::Preserve;
+    if settings.preserve_major && current_exists && !converting && current_ref.precision != VersionPrecision::Full {
         return Ok(TargetDecision {
             target: tags.iter().find(|tag| tag.name == current).cloned(),
             current_missing: false,
@@ -1261,11 +1311,13 @@ fn select_tag_update_target(
     }
 
     let latest = latest_semver_tag(settings, tags, Some(current_ref.version.major));
+    // A full pin under the default preserve style only moves forward, so a tag
+    // at the same version is not a downgrade. An explicit pin style is a
+    // conversion request, so reformatting an already-latest ref is allowed.
     let latest = latest.filter(|tag| {
-        if current_ref.precision != VersionPrecision::Full {
-            return true;
-        }
-        parse_version_tag(&tag.name).is_some_and(|target_version| target_version > current_ref.version)
+        converting
+            || current_ref.precision != VersionPrecision::Full
+            || parse_version_tag(&tag.name).is_some_and(|target_version| target_version > current_ref.version)
     });
     let mut target = latest
         .as_ref()
@@ -1287,18 +1339,10 @@ fn select_tag_update_target(
         });
     }
 
-    if !current_exists && !floating_ref_is_resolved && settings.missing_ref != MissingRefPolicy::Fallback {
-        return Ok(TargetDecision {
-            target: None,
-            current_missing: true,
-            diagnostic,
-        });
-    }
-
-    if let (Some(target), Some(latest)) = (&target, &latest)
-        && target != current
-        && target != &latest.name
-        && !tags.iter().any(|tag| tag.name == *target)
+    if (current_exists || converting)
+        && let (Some(formatted), Some(latest_tag)) = (target.clone(), latest.as_ref())
+        && formatted != latest_tag.name
+        && !tags.iter().any(|tag| tag.name == formatted)
     {
         let branch_lookup = load_branch_exists(
             settings,
@@ -1306,17 +1350,43 @@ fn select_tag_update_target(
             provider,
             reference.parsed.owner.as_deref().unwrap_or_default(),
             reference.parsed.repo.as_deref().unwrap_or_default(),
-            target,
+            &formatted,
         )?;
         if let Some(warning) = branch_lookup.warning {
             diagnostic = Some(warning);
         }
         if branch_lookup.value.is_none() {
+            if converting {
+                // The requested floating style does not exist upstream: fall
+                // back to the concrete release tag rather than dropping the update.
+                target = Some(latest_tag.name.clone());
+            } else {
+                return Ok(TargetDecision {
+                    target: None,
+                    current_missing: false,
+                    diagnostic: diagnostic.or_else(|| {
+                        Some(format!(
+                            "pin-style target does not exist as a tag or branch: {formatted}"
+                        ))
+                    }),
+                });
+            }
+        }
+    }
+
+    let mut converted_missing = false;
+    if !current_exists && !floating_ref_is_resolved && settings.missing_ref != MissingRefPolicy::Fallback {
+        // A ref already at the requested style whose upstream tag was deleted
+        // still gets the concrete release as its target. A style change from a
+        // deleted floating tag is not converted without `missing_ref = fallback`.
+        let style_matches = converting && pin_style_precision(settings.pin_style) == Some(current_ref.precision);
+        if style_matches && target.as_deref().is_some_and(|target| target != current) {
+            converted_missing = true;
+        } else {
             return Ok(TargetDecision {
                 target: None,
-                current_missing: false,
-                diagnostic: diagnostic
-                    .or_else(|| Some(format!("pin-style target does not exist as a tag or branch: {target}"))),
+                current_missing: true,
+                diagnostic,
             });
         }
     }
@@ -1328,9 +1398,109 @@ fn select_tag_update_target(
 
     Ok(TargetDecision {
         target,
-        current_missing: !current_exists && !floating_ref_is_resolved,
+        current_missing: !current_exists && !floating_ref_is_resolved && !converted_missing,
         diagnostic,
     })
+}
+
+/// Convert a SHA pin to a tag under `--latest-tag` with an explicit pin style.
+fn select_sha_to_tag_target(
+    settings: &Settings,
+    cache: &mut CacheState,
+    provider: &impl TagProvider,
+    reference: &ReferenceReport,
+    current: &str,
+    tags: &[RemoteTag],
+) -> Result<TargetDecision> {
+    let current_tag_version = tags
+        .iter()
+        .filter(|tag| tag.sha.eq_ignore_ascii_case(current))
+        .filter_map(|tag| parse_version_tag(&tag.name))
+        .filter(|version| settings.include_prereleases || version.pre.is_empty())
+        .max();
+    let major = if settings.preserve_major {
+        current_tag_version.map(|version| version.major)
+    } else {
+        None
+    };
+    let Some(latest) = latest_semver_tag(settings, tags, major) else {
+        return Ok(TargetDecision {
+            target: None,
+            current_missing: false,
+            diagnostic: None,
+        });
+    };
+    let Some(latest_ref) = parse_version_ref(&latest.name) else {
+        return Ok(TargetDecision {
+            target: None,
+            current_missing: false,
+            diagnostic: None,
+        });
+    };
+    let mut target = format_pin_style(settings.pin_style, &latest.name, &latest_ref, &latest);
+    let mut diagnostic = None;
+    if target != latest.name && !tags.iter().any(|tag| tag.name == target) {
+        let branch_lookup = load_branch_exists(
+            settings,
+            cache,
+            provider,
+            reference.parsed.owner.as_deref().unwrap_or_default(),
+            reference.parsed.repo.as_deref().unwrap_or_default(),
+            &target,
+        )?;
+        if let Some(warning) = branch_lookup.warning {
+            diagnostic = Some(warning);
+        }
+        if branch_lookup.value.is_none() {
+            target = latest.name.clone();
+        }
+    }
+    Ok(TargetDecision {
+        target: Some(RemoteTag {
+            name: target,
+            sha: latest.sha,
+        }),
+        current_missing: false,
+        diagnostic,
+    })
+}
+
+fn pin_style_precision(pin_style: PinStyle) -> Option<VersionPrecision> {
+    match pin_style {
+        PinStyle::Preserve => None,
+        PinStyle::Major => Some(VersionPrecision::Major),
+        PinStyle::Minor => Some(VersionPrecision::Minor),
+        PinStyle::Full => Some(VersionPrecision::Full),
+    }
+}
+
+/// Build the rewrite for the trailing `# vN` comment. When `remove_when_bare`
+/// is set and the comment is nothing but a version token, the whole comment is
+/// dropped; otherwise the token is reformatted to the target release at the
+/// comment's own precision.
+fn comment_rewrite(reference: &ReferenceReport, tag: &RemoteTag, remove_when_bare: bool) -> Option<CommentRewrite> {
+    let comment = reference.comment.as_ref()?;
+    if remove_when_bare && let Some(removable) = &comment.removable {
+        return Some(CommentRewrite {
+            span: removable.span,
+            current: removable.text.clone(),
+            target: String::new(),
+        });
+    }
+    let target_token = format_comment_version(comment, tag)?;
+    if target_token == comment.version {
+        return None;
+    }
+    Some(CommentRewrite {
+        span: comment.version_span,
+        current: comment.version.clone(),
+        target: target_token,
+    })
+}
+
+fn format_comment_version(comment: &crate::scanner::TrailingComment, tag: &RemoteTag) -> Option<String> {
+    let comment_ref = parse_version_ref(&comment.version)?;
+    Some(format_version_ref(comment_ref.precision, &comment.version, tag))
 }
 
 fn select_hash_update_target(
@@ -1792,6 +1962,7 @@ mod tests {
             rewrite_supported: false,
             rewrite_reason: None,
             update_ignored: false,
+            comment: None,
         }
     }
 
@@ -1800,6 +1971,135 @@ mod tests {
             name: name.to_string(),
             sha: format!("sha-{name}"),
         }
+    }
+
+    fn reference_with_bare_comment(raw: &str, comment_version: &str) -> ReferenceReport {
+        let mut report = reference(raw);
+        report.comment = Some(crate::scanner::TrailingComment {
+            version_span: crate::scanner::ByteSpan { start: 0, end: 0 },
+            version: comment_version.to_string(),
+            removable: Some(crate::scanner::RemovableComment {
+                span: crate::scanner::ByteSpan { start: 0, end: 0 },
+                text: format!(" # {comment_version}"),
+            }),
+        });
+        report
+    }
+
+    #[test]
+    fn latest_tag_with_pin_style_converts_sha_to_tag_and_drops_comment() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.pin_style = PinStyle::Major;
+        let sha = "d23441a48e516b6c34aea4fa41551a30e30af803";
+        let provider = FakeProvider {
+            tags: vec![
+                tag_with_sha("v7", "7777777777777777777777777777777777777777"),
+                tag_with_sha("v7.0.1", sha),
+            ],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference_with_bare_comment(
+                &format!("actions/checkout@{sha}"),
+                "v7.0.1",
+            )],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(resolution.updates.len(), 1);
+        assert_eq!(resolution.updates[0].target.as_deref(), Some("v7"));
+        let comment = resolution.updates[0].comment.as_ref().expect("comment rewrite");
+        assert_eq!(comment.target, "");
+        assert_eq!(comment.current, " # v7.0.1");
+    }
+
+    #[test]
+    fn latest_tag_with_pin_style_falls_back_to_full_when_float_tag_missing() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.pin_style = PinStyle::Major;
+        settings.preserve_major = false;
+        let sha = "d23441a48e516b6c34aea4fa41551a30e30af803";
+        let provider = FakeProvider {
+            tags: vec![
+                tag_with_sha("v10.1.0", sha),
+                tag_with_sha("v7", "7777777777777777777777777777777777777777"),
+            ],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference(&format!("astral-sh/setup-uv@{sha}"))],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(resolution.updates.len(), 1);
+        assert_eq!(resolution.updates[0].target.as_deref(), Some("v10.1.0"));
+    }
+
+    #[test]
+    fn default_latest_tag_keeps_sha_advisory_without_pin_style() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = settings(temp.path());
+        let sha = "d23441a48e516b6c34aea4fa41551a30e30af803";
+        let provider = FakeProvider {
+            tags: vec![
+                tag_with_sha("v7", "7777777777777777777777777777777777777777"),
+                tag_with_sha("v7.0.1", sha),
+            ],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference(&format!("actions/checkout@{sha}"))],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(resolution.updates.is_empty());
+    }
+
+    #[test]
+    fn latest_updates_sha_comment_to_the_new_release() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.update_mode = UpdateMode::Latest;
+        settings.preserve_major = false;
+        let sha = "d23441a48e516b6c34aea4fa41551a30e30af803";
+        let provider = FakeProvider {
+            tags: vec![
+                tag_with_sha("v6.0.0", sha),
+                tag_with_sha("v7", "7777777777777777777777777777777777777777"),
+                tag_with_sha("v7.0.1", "3d3c42e5aac5ba805825da76410c181273ba90b1"),
+            ],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference_with_bare_comment(&format!("actions/checkout@{sha}"), "v6")],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(resolution.updates.len(), 1);
+        assert_eq!(
+            resolution.updates[0].target.as_deref(),
+            Some("3d3c42e5aac5ba805825da76410c181273ba90b1")
+        );
+        let comment = resolution.updates[0].comment.as_ref().expect("comment rewrite");
+        assert_eq!(comment.target, "v7", "major comment precision is preserved");
     }
 
     #[test]
@@ -2044,7 +2344,7 @@ mod tests {
     }
 
     #[test]
-    fn pin_style_does_not_rewrite_to_missing_float_target() {
+    fn pin_style_falls_back_to_concrete_tag_when_float_target_missing() {
         let temp = tempfile::tempdir().unwrap();
         let mut settings = settings(temp.path());
         settings.pin_style = PinStyle::Major;
@@ -2063,12 +2363,78 @@ mod tests {
         )
         .unwrap();
 
-        assert!(resolution.updates.is_empty());
-        assert!(
-            resolution.diagnostics[0]
-                .message
-                .contains("pin-style target does not exist")
+        assert_eq!(resolution.updates.len(), 1);
+        assert_eq!(
+            resolution.updates[0].target.as_deref(),
+            Some("v4.2.0"),
+            "the missing v4 float falls back to the concrete release"
         );
+        assert!(resolution.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn pin_style_reformats_ref_already_at_latest_release() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.pin_style = PinStyle::Major;
+        let provider = FakeProvider {
+            tags: vec![tag("v7"), tag("v7.0.1")],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("actions/checkout@v7.0.1")],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(resolution.updates.len(), 1);
+        assert_eq!(resolution.updates[0].target.as_deref(), Some("v7"));
+    }
+
+    #[test]
+    fn preserve_does_not_reformat_ref_already_at_latest_release() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = settings(temp.path());
+        let provider = FakeProvider {
+            tags: vec![tag("v7"), tag("v7.0.1")],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("actions/checkout@v7.0.1")],
+            &provider,
+        )
+        .unwrap();
+
+        assert!(resolution.updates.is_empty());
+    }
+
+    #[test]
+    fn pin_style_replaces_deleted_float_with_concrete_release() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = settings(temp.path());
+        settings.pin_style = PinStyle::Major;
+        let provider = FakeProvider {
+            tags: vec![tag("v10.1.0")],
+            calls: Cell::new(0),
+        };
+
+        let resolution = resolve_updates_with_provider(
+            &settings,
+            CacheState::prepare(&settings).unwrap(),
+            &[reference("astral-sh/setup-uv@v10")],
+            &provider,
+        )
+        .unwrap();
+
+        assert_eq!(resolution.updates.len(), 1);
+        assert_eq!(resolution.updates[0].target.as_deref(), Some("v10.1.0"));
+        assert!(resolution.diagnostics.is_empty());
     }
 
     #[test]

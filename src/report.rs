@@ -62,6 +62,17 @@ pub struct UpdateReport {
     pub rewrite_supported: bool,
     #[serde(skip)]
     pub rewrite_reason: Option<String>,
+    #[serde(skip)]
+    pub comment: Option<CommentRewrite>,
+}
+
+/// An additional rewrite for the trailing `# vN` comment on a `uses:` line,
+/// applied alongside the ref rewrite.
+#[derive(Debug, Clone)]
+pub struct CommentRewrite {
+    pub span: crate::scanner::ByteSpan,
+    pub current: String,
+    pub target: String,
 }
 
 impl RunReport {

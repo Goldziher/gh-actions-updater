@@ -65,6 +65,14 @@ pub fn apply_updates(settings: &Settings, updates: &[UpdateReport]) -> Result<Re
             target,
             line: update.line,
         });
+        if let Some(comment) = &update.comment {
+            by_file.entry(&update.file).or_default().push(Replacement {
+                span: comment.span,
+                current: comment.current.clone(),
+                target: comment.target.clone(),
+                line: update.line,
+            });
+        }
     }
 
     for (file, mut replacements) in by_file {
@@ -226,7 +234,7 @@ mod tests {
     use super::apply_updates;
     use crate::cli::{ColorChoice, MissingRefPolicy, OutputFormat, PinStyle, UpdateMode};
     use crate::config::{CacheTtl, Settings};
-    use crate::report::UpdateReport;
+    use crate::report::{CommentRewrite, UpdateReport};
     use crate::scanner::ByteSpan;
     use std::fs;
     use std::path::Path;
@@ -282,6 +290,7 @@ mod tests {
             ref_span: Some(ByteSpan { start, end: start + 2 }),
             rewrite_supported: true,
             rewrite_reason: None,
+            comment: None,
         };
 
         let result = apply_updates(&settings(temp.path(), false, false), &[update]).unwrap();
@@ -309,6 +318,7 @@ mod tests {
             ref_span: Some(ByteSpan { start, end: start + 2 }),
             rewrite_supported: true,
             rewrite_reason: None,
+            comment: None,
         };
 
         let result = apply_updates(&settings(temp.path(), true, true), &[update]).unwrap();
@@ -318,5 +328,43 @@ mod tests {
         assert_eq!(fs::read_to_string(path).unwrap(), content);
         assert!(result.diffs[0].contains("actions/checkout@v4.2.0"));
         assert!(!result.diffs[0].contains("a//"));
+    }
+
+    #[test]
+    fn rewrites_ref_and_trailing_comment_together() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("ci.yml");
+        let content = "jobs:\n  test:\n    steps:\n      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6\n";
+        fs::write(&path, content).unwrap();
+        let sha_start = content.find("d23441").unwrap();
+        let comment_version_start = content.find("# v6").unwrap() + 2;
+        let update = UpdateReport {
+            file: path.display().to_string(),
+            line: 4,
+            current: "d23441a48e516b6c34aea4fa41551a30e30af803".to_string(),
+            target: Some("3d3c42e5aac5ba805825da76410c181273ba90b1".to_string()),
+            ref_span: Some(ByteSpan {
+                start: sha_start,
+                end: sha_start + 40,
+            }),
+            rewrite_supported: true,
+            rewrite_reason: None,
+            comment: Some(CommentRewrite {
+                span: ByteSpan {
+                    start: comment_version_start,
+                    end: comment_version_start + 2,
+                },
+                current: "v6".to_string(),
+                target: "v7".to_string(),
+            }),
+        };
+
+        let result = apply_updates(&settings(temp.path(), false, false), &[update]).unwrap();
+
+        assert!(result.changed);
+        assert_eq!(
+            fs::read_to_string(path).unwrap(),
+            "jobs:\n  test:\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7\n"
+        );
     }
 }

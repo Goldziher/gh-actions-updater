@@ -40,12 +40,35 @@ pub struct ReferenceReport {
     pub rewrite_reason: Option<String>,
     #[serde(skip)]
     pub update_ignored: bool,
+    #[serde(skip)]
+    pub comment: Option<TrailingComment>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct ByteSpan {
     pub start: usize,
     pub end: usize,
+}
+
+/// A semver-like token in the trailing `# ...` comment on a `uses:` line, for
+/// example the `v6` in `- uses: actions/checkout@<sha> # v6`.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct TrailingComment {
+    /// Span of the version token itself, replaced in place when the pinned SHA
+    /// moves to a newer release.
+    pub version_span: ByteSpan,
+    /// The token text, for example `v6`.
+    pub version: String,
+    /// When the comment is nothing but the version token, the whole
+    /// `<whitespace># <version>` region, ready to be deleted once the ref
+    /// becomes a tag and the comment is redundant.
+    pub removable: Option<RemovableComment>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct RemovableComment {
+    pub span: ByteSpan,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -236,6 +259,7 @@ fn scan_content(path: &Path, kind: FileKind, content: &str) -> Result<Vec<Refere
         } else {
             Some("uses value is not a simple single-line rewrite target".to_string())
         };
+        let comment = ref_span.and_then(|span| find_trailing_comment(content, span.end));
         references.push(ReferenceReport {
             file: path.display().to_string(),
             line: value.line,
@@ -246,6 +270,7 @@ fn scan_content(path: &Path, kind: FileKind, content: &str) -> Result<Vec<Refere
             rewrite_supported,
             rewrite_reason,
             update_ignored: value.update_ignored,
+            comment,
         });
     }
     Ok(references)
@@ -414,6 +439,92 @@ fn find_value_span_in_source(content: &str, parser_span: ByteSpan, raw: &str) ->
         start: parser_span.start + offset,
         end: parser_span.start + offset + raw.len(),
     })
+}
+
+/// Locate a semver-like token in the trailing `# ...` comment that follows a
+/// `uses:` value, if any. Only the part of the line from `value_end` onward is
+/// examined, and only a `v`-prefixed token counts — a bare number in prose such
+/// as `# node 20` must not be mistaken for a pinned version.
+fn find_trailing_comment(content: &str, value_end: usize) -> Option<TrailingComment> {
+    if value_end > content.len() || !content.is_char_boundary(value_end) {
+        return None;
+    }
+    let line_end = content[value_end..]
+        .find('\n')
+        .map(|offset| value_end + offset)
+        .unwrap_or(content.len());
+    let tail = &content[value_end..line_end];
+    let hash_offset = tail.find('#')?;
+    let between = &tail[..hash_offset];
+    if !between.chars().all(|c| c.is_whitespace() || c == '"' || c == '\'') {
+        return None;
+    }
+    let comment_start = value_end + hash_offset + 1;
+    let comment = &content[comment_start..line_end];
+    let (token_offset, token) = find_version_token(comment)?;
+    let version_start = comment_start + token_offset;
+    let version_end = version_start + token.len();
+    let before = &comment[..token_offset];
+    let after = &comment[token_offset + token.len()..];
+    let removable = if before.chars().any(char::is_alphanumeric) || after.chars().any(char::is_alphanumeric) {
+        None
+    } else {
+        let removal_start = value_end + between.rfind(['"', '\'']).map_or(0, |quote| quote + 1);
+        Some(RemovableComment {
+            span: ByteSpan {
+                start: removal_start,
+                end: version_end,
+            },
+            text: content[removal_start..version_end].to_string(),
+        })
+    };
+    Some(TrailingComment {
+        version_span: ByteSpan {
+            start: version_start,
+            end: version_end,
+        },
+        version: token.to_string(),
+        removable,
+    })
+}
+
+/// The first `v`-prefixed semver-like token in `comment`, with its byte offset.
+fn find_version_token(comment: &str) -> Option<(usize, &str)> {
+    let bytes = comment.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let is_start = (bytes[index] == b'v' || bytes[index] == b'V')
+            && index + 1 < bytes.len()
+            && bytes[index + 1].is_ascii_digit()
+            && (index == 0 || !bytes[index - 1].is_ascii_alphanumeric());
+        if is_start {
+            let mut end = index + 1;
+            while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'.') {
+                end += 1;
+            }
+            let candidate = &comment[index..end];
+            if is_version_token(candidate) {
+                return Some((index, candidate));
+            }
+            index = end;
+            continue;
+        }
+        index += 1;
+    }
+    None
+}
+
+fn is_version_token(token: &str) -> bool {
+    let version = token
+        .strip_prefix('v')
+        .or_else(|| token.strip_prefix('V'))
+        .unwrap_or(token);
+    let parts: Vec<_> = version.split('.').collect();
+    !parts.is_empty()
+        && parts.len() <= 3
+        && parts
+            .iter()
+            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 fn schema_diagnostics(path: &Path, kind: FileKind, content: &str, settings: &Settings) -> Vec<Diagnostic> {
@@ -725,5 +836,62 @@ jobs:
         assert_eq!(&content[span0.start..span0.end], "v6");
         let span1 = refs[1].ref_span.expect("Should have ref span");
         assert_eq!(&content[span1.start..span1.end], "v20");
+    }
+
+    #[test]
+    fn captures_bare_trailing_version_comment_as_removable() {
+        let content = r#"
+jobs:
+  test:
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+"#;
+        let refs = scan_content(Path::new(".github/workflows/ci.yml"), FileKind::Workflow, content).unwrap();
+        let comment = refs[0].comment.as_ref().expect("comment captured");
+        assert_eq!(comment.version, "v6");
+        assert_eq!(&content[comment.version_span.start..comment.version_span.end], "v6");
+        let removable = comment.removable.as_ref().expect("bare comment is removable");
+        assert_eq!(removable.text, " # v6");
+        assert_eq!(&content[removable.span.start..removable.span.end], " # v6");
+    }
+
+    #[test]
+    fn captures_annotated_comment_without_marking_it_removable() {
+        let content = r#"
+jobs:
+  test:
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # ~keep v6
+"#;
+        let refs = scan_content(Path::new(".github/workflows/ci.yml"), FileKind::Workflow, content).unwrap();
+        let comment = refs[0].comment.as_ref().expect("comment captured");
+        assert_eq!(comment.version, "v6");
+        assert!(comment.removable.is_none(), "annotated comments are updated in place");
+    }
+
+    #[test]
+    fn ignores_prose_comment_without_a_v_prefixed_version() {
+        let content = r#"
+jobs:
+  test:
+    steps:
+      - uses: actions/checkout@v4 # node 20 baseline
+"#;
+        let refs = scan_content(Path::new(".github/workflows/ci.yml"), FileKind::Workflow, content).unwrap();
+        assert!(refs[0].comment.is_none());
+    }
+
+    #[test]
+    fn captures_comment_after_a_quoted_value() {
+        let content = r#"
+jobs:
+  test:
+    steps:
+      - uses: "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803" # v6
+"#;
+        let refs = scan_content(Path::new(".github/workflows/ci.yml"), FileKind::Workflow, content).unwrap();
+        let comment = refs[0].comment.as_ref().expect("comment captured");
+        let removable = comment.removable.as_ref().expect("removable");
+        assert_eq!(removable.text, " # v6");
     }
 }
