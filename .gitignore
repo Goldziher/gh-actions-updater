@@ -20,6 +20,8 @@ poly.local.toml
 .codex/commands/
 .codex/plugins.json
 .codex/skills/
+.opencode/agents/
+.opencode/skills/
 AGENTS.md
 CLAUDE.md
 # END ai-rulez
