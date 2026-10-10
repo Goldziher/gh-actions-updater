@@ -1,8 +1,15 @@
 ---
-priority: high
-aliases: [l]
-usage: "/lint"
-description: "Run formatting, clippy, wrapper syntax, and release config checks"
+type: Reference
+title: Lint
+description: Run formatting, clippy, wrapper syntax, and release config checks
+x-ai-rulez:
+  kind: command
+  id: lint
+  metadata:
+    priority: high
+    aliases:
+      - l
+    usage: /lint
 ---
 
 # Lint

@@ -1,8 +1,15 @@
 ---
-priority: high
-aliases: [t]
-usage: "/test"
-description: "Run Rust tests and installed-binary smoke checks"
+type: Reference
+title: Test
+description: Run Rust tests and installed-binary smoke checks
+x-ai-rulez:
+  kind: command
+  id: test
+  metadata:
+    priority: high
+    aliases:
+      - t
+    usage: /test
 ---
 
 # Test

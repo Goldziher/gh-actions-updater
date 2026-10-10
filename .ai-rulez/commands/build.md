@@ -1,8 +1,15 @@
 ---
-priority: high
-aliases: [b]
-usage: "/build"
-description: "Build the gau CLI and package wrappers"
+type: Reference
+title: Build
+description: Build the gau CLI and package wrappers
+x-ai-rulez:
+  kind: command
+  id: build
+  metadata:
+    priority: high
+    aliases:
+      - b
+    usage: /build
 ---
 
 # Build

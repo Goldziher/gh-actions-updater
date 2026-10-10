@@ -1,8 +1,15 @@
 ---
-priority: high
-aliases: [f]
-usage: "/fix"
-description: "Apply safe formatting and mechanical fixes"
+type: Reference
+title: Fix
+description: Apply safe formatting and mechanical fixes
+x-ai-rulez:
+  kind: command
+  id: fix
+  metadata:
+    priority: high
+    aliases:
+      - f
+    usage: /fix
 ---
 
 # Fix

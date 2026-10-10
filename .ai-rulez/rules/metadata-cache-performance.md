@@ -1,5 +1,11 @@
 ---
-priority: critical
+type: Decision
+title: Metadata Cache Performance
+x-ai-rulez:
+  kind: rule
+  id: metadata-cache-performance
+  metadata:
+    priority: critical
 ---
 
 # Metadata, Cache, And Performance

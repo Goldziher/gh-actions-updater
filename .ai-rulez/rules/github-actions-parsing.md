@@ -1,5 +1,11 @@
 ---
-priority: critical
+type: Decision
+title: Github Actions Parsing
+x-ai-rulez:
+  kind: rule
+  id: github-actions-parsing
+  metadata:
+    priority: critical
 ---
 
 # GitHub Actions Parsing

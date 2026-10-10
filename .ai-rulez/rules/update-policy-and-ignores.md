@@ -1,5 +1,11 @@
 ---
-priority: high
+type: Decision
+title: Update Policy And Ignores
+x-ai-rulez:
+  kind: rule
+  id: update-policy-and-ignores
+  metadata:
+    priority: high
 ---
 
 # Update Policy And Ignores

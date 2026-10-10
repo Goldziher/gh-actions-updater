@@ -1,5 +1,11 @@
 ---
-priority: high
+type: Decision
+title: Configuration System
+x-ai-rulez:
+  kind: rule
+  id: configuration-system
+  metadata:
+    priority: high
 ---
 
 # Configuration System
