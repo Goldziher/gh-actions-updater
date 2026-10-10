@@ -1,4 +1,6 @@
 [package]
+authors = ["Na'aman Hirschfeld <nhirschfeld@gmail.com>"]
+include = ["/Cargo.toml", "/Cargo.lock", "/src/**", "/README.md", "/LICENSE"]
 name = "gh-actions-updater"
 version = "0.3.0"
 edition = "2024"
@@ -11,20 +13,6 @@ homepage = "https://github.com/Goldziher/gh-actions-updater"
 readme = "README.md"
 categories = ["command-line-utilities", "development-tools"]
 keywords = ["github-actions", "ci", "cli", "workflow", "updater"]
-include = [
-  "Cargo.toml",
-  "Cargo.lock",
-  "README.md",
-  "CHANGELOG.md",
-  "LICENSE",
-  "src/**",
-  "tests/**",
-  "docs/**",
-  ".pre-commit-hooks.yaml",
-  "action.yml",
-  "poly-hooks.toml",
-  "scripts/install-action.sh",
-]
 
 [[bin]]
 name = "gau"
