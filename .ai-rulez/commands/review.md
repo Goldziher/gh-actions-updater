@@ -12,11 +12,11 @@ x-ai-rulez:
     usage: /review
 ---
 
-# Review
+## Review
 
 Review staged and unstaged changes with a bug-first stance.
 
-## Steps
+### Steps
 
 1. Inspect `git diff` and `git diff --staged`.
 2. Prioritize findings in this order:

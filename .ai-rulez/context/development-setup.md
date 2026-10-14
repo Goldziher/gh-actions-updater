@@ -8,9 +8,9 @@ x-ai-rulez:
     priority: high
 ---
 
-# Development Setup
+## Development Setup
 
-## Prerequisites
+### Prerequisites
 
 - Rust 1.85+ with edition 2024 support.
 - Cargo and rustfmt/clippy.
@@ -19,7 +19,7 @@ x-ai-rulez:
 - GoReleaser for release-config checks.
 - `jq`, `gh`, and npm auth for release/publish smoke work.
 
-## Core Commands
+### Core Commands
 
 ```bash
 cargo fmt --all --check
@@ -40,7 +40,7 @@ gau --no-cache --no-schema-validation --format json .github
 
 The package installs `gau`; do not assume a `gh-actions-updater` binary exists.
 
-## Wrapper Checks
+### Wrapper Checks
 
 ```bash
 node --check npm-package/index.js
@@ -52,7 +52,7 @@ python3 -m compileall pip-package/gh_actions_updater
 python3 -m build pip-package --outdir /tmp/ghau-pip-dist
 ```
 
-## Release Checks
+### Release Checks
 
 ```bash
 goreleaser check
@@ -65,7 +65,7 @@ When adding dependencies, run:
 cargo upgrade --incompatible
 ```
 
-## Corpus Testing
+### Corpus Testing
 
 Use dry-run only against sibling repositories:
 

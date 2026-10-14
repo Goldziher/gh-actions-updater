@@ -8,12 +8,12 @@ x-ai-rulez:
     priority: high
 ---
 
-# Update Policy And Ignores
+## Update Policy And Ignores
 
 Updates must be predictable and conservative. Reporting a reference is not the
 same as rewriting it.
 
-## Default Update Policy
+### Default Update Policy
 
 - Latest-tag mode is the default.
 - Select the latest semantic version across majors by default.
@@ -27,7 +27,7 @@ same as rewriting it.
   then pins to that tag's commit SHA.
 - Never jump to the remote repository default branch as an update target.
 
-## Missing Or Deleted Refs
+### Missing Or Deleted Refs
 
 Missing refs are controlled by `missing_ref`:
 
@@ -39,7 +39,7 @@ Missing refs are controlled by `missing_ref`:
 Do not silently rewrite a deleted tag unless the effective policy is
 `fallback`.
 
-## Excluding Updates
+### Excluding Updates
 
 Config can exclude refs from update selection:
 
@@ -57,7 +57,7 @@ Inline ignore comments suppress updates for that single `uses:` line:
 Ignore/exclude behavior should prevent metadata fetches when possible, but it
 should not hide the reference from scan output.
 
-## Rewrites And Diffs
+### Rewrites And Diffs
 
 - Rewrite only safe byte spans.
 - `--dry-run` must never mutate files.

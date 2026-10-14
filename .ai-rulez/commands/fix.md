@@ -12,11 +12,11 @@ x-ai-rulez:
     usage: /fix
 ---
 
-# Fix
+## Fix
 
 Apply safe mechanical fixes only.
 
-## Steps
+### Steps
 
 1. Run `cargo fmt --all`.
 2. Run `cargo clippy --fix --allow-dirty --allow-staged --all-targets --all-features` only when the requested work allows mechanical lint fixes.

@@ -8,13 +8,13 @@ x-ai-rulez:
     priority: high
 ---
 
-# Cross-Platform Distribution
+## Cross-Platform Distribution
 
 Package names stay `gh-actions-updater`; the installed command is `gau`, with a
 `ghau` alias for shells where `gau` is already taken (for example the oh-my-zsh
 `gau` alias for `git add --update`).
 
-## Channels
+### Channels
 
 - crates.io package: `gh-actions-updater`
 - npm package: `gh-actions-updater`
@@ -25,7 +25,7 @@ Package names stay `gh-actions-updater`; the installed command is `gau`, with a
 Do not add a compatibility `gh-actions-updater` binary unless explicitly
 requested. Wrapper packages expose `gau` and the `ghau` alias, nothing else.
 
-## Release Assets
+### Release Assets
 
 GoReleaser builds the `gau` binary. Archive names may still use the project
 name `gh-actions-updater` for discoverability and wrapper download URLs.
@@ -40,7 +40,7 @@ Expected targets:
 
 Homebrew bottles are produced by the `Goldziher/homebrew-tap` bottle workflow.
 
-## Integrations
+### Integrations
 
 - The composite GitHub Action exposes bounded `check` and `update` operations.
 - The Action installer verifies release archives against `checksums.txt`.
@@ -49,7 +49,7 @@ Homebrew bottles are produced by the `Goldziher/homebrew-tap` bottle workflow.
 - Stable releases move `v0` only after every required archive and checksum is
   present and the release is published.
 
-## Wrapper Rules
+### Wrapper Rules
 
 - npm `bin` exposes `gau` and `ghau` (both point at the same wrapper).
 - PyPI console scripts expose `gau` and `ghau`.
@@ -63,7 +63,7 @@ Homebrew bottles are produced by the `Goldziher/homebrew-tap` bottle workflow.
 - `GH_ACTIONS_UPDATER_BINARY` may override the Python wrapper binary path.
 - Test wrapper syntax and packaging whenever wrapper code changes.
 
-## Trusted Publishing
+### Trusted Publishing
 
 crates.io, npm, and PyPI are intended to use trusted publishing/provenance in
 CI. Manual bootstrap publishes may be needed to configure registry-side trusted

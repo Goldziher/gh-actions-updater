@@ -12,11 +12,11 @@ x-ai-rulez:
     usage: /lint
 ---
 
-# Lint
+## Lint
 
 Run static quality checks.
 
-## Steps
+### Steps
 
 1. Run `cargo fmt --all --check`.
 2. Run `cargo clippy --locked --all-targets --all-features -- -D warnings`.

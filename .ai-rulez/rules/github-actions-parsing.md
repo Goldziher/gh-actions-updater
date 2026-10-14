@@ -8,12 +8,12 @@ x-ai-rulez:
     priority: critical
 ---
 
-# GitHub Actions Parsing
+## GitHub Actions Parsing
 
 The scanner targets GitHub Actions workflow files and action metadata files. It
 must not become a generic YAML updater.
 
-## Supported Files
+### Supported Files
 
 Default non-recursive discovery covers only the requested root's own Actions
 surface:
@@ -28,7 +28,7 @@ surface:
 `-r, --recursive` and `[scan] recursive = true` opt into nested `.github`
 folders for workspace-wide runs.
 
-## Supported `uses:` Locations
+### Supported `uses:` Locations
 
 - Workflow step actions: `jobs.<job_id>.steps[*].uses`.
 - Reusable workflow calls: `jobs.<job_id>.uses`.
@@ -37,7 +37,7 @@ folders for workspace-wide runs.
 Ignore top-level `uses` and arbitrary nested keys that are not part of the
 GitHub Actions schema.
 
-## Reference Classification
+### Reference Classification
 
 Classify references as:
 
@@ -52,7 +52,7 @@ Only semver-like tag refs are update candidates by default. Branch refs, Docker
 refs, local refs, non-semver refs, and immutable SHAs are reportable but not
 default update targets.
 
-## Source Preservation
+### Source Preservation
 
 Use parser-derived byte spans for rewrites. Only replace the ref segment after
 the final `@`. Preserve comments, quoting, whitespace, file ordering, and line

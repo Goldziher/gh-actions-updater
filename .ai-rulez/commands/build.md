@@ -12,11 +12,11 @@ x-ai-rulez:
     usage: /build
 ---
 
-# Build
+## Build
 
 Build and package-check the project.
 
-## Steps
+### Steps
 
 1. Run `cargo build --locked --release`.
 2. Confirm the release binary is `target/release/gau`.

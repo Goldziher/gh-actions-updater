@@ -8,12 +8,12 @@ x-ai-rulez:
     priority: high
 ---
 
-# Configuration System
+## Configuration System
 
 Configuration must support zero-config local use, commit-step hooks, and
 workspace-wide recursive audits.
 
-## Files And Precedence
+### Files And Precedence
 
 Project config file: `.gh-actions-updater.toml`.
 
@@ -30,7 +30,7 @@ Precedence:
 CLI `--include` and `--exclude` are additive with config lists. Do not replace
 configured excludes when CLI excludes are present.
 
-## Config Sections
+### Config Sections
 
 - `[scan]`: `include`, `exclude`, `recursive`
 - `[cache]`: `enabled`, `ttl`, `dir`
@@ -47,7 +47,7 @@ Environment variables:
 - `GHAU_CACHE_DIR`
 - `GHAU_CACHE_TTL`
 
-## Init
+### Init
 
 `gau --init` writes `.gh-actions-updater.toml`.
 
@@ -56,7 +56,7 @@ Environment variables:
 - `--init --recursive` writes `recursive = true`.
 - Include all supported config sections in the generated file.
 
-## Compatibility
+### Compatibility
 
 The package name is `gh-actions-updater`, but examples and generated docs should
 use the `gau` command.

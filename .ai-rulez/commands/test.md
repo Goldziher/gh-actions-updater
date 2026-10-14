@@ -12,11 +12,11 @@ x-ai-rulez:
     usage: /test
 ---
 
-# Test
+## Test
 
 Run the test suite and focused CLI smoke tests.
 
-## Steps
+### Steps
 
 1. Run `cargo test --locked --all-targets --all-features`.
 2. Install locally when CLI behavior changed:

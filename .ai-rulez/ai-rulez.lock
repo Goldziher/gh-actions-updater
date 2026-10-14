@@ -1,0 +1,187 @@
+# ai-rulez.lock: pins remote includes, installed skills and authored content. Commit this file.
+# Refresh it with `ai-rulez lock`; `ai-rulez generate --locked` fails when it is stale.
+
+version = 1
+ai_rulez_version = '5.3.0'
+scope = 'all'
+tree = 'sha256:03b0dbdff6584c8fd2150c43032f35658aa0187d23212d5ed25a9346350593f3'
+
+[[served]]
+name = 'build'
+source = ''
+commit = ''
+digest = 'sha256:a9273acb0b50f78f300706eb42af47820282602cc32e1b78a8c82cf4d6b3574a'
+
+[[served]]
+name = 'code-quality-standards'
+source = 'builtin://universal/code-quality/skills/code-quality-standards/SKILL.md'
+commit = ''
+digest = 'sha256:0126cc7c038b3e343ee56866949865dd799bde0de4884ba0bdfeb28655fa8134'
+
+[[served]]
+name = 'dependency-awareness'
+source = 'builtin://universal/security/skills/dependency-awareness/SKILL.md'
+commit = ''
+digest = 'sha256:e108ed344fe20948fcbda61b96266026bb9b2318df089964c088c0455294f8d3'
+
+[[served]]
+name = 'error-handling'
+source = 'builtin://universal/code-quality/skills/error-handling/SKILL.md'
+commit = ''
+digest = 'sha256:fddb5f980e8d98c91b459be578cdea7e0fc765d8219f66088892e936f0d1e349'
+
+[[served]]
+name = 'fix'
+source = ''
+commit = ''
+digest = 'sha256:b2c9eb193592a4f8499f6214226a647760e66f6b4cf375b888f7670fe9ea32d1'
+
+[[served]]
+name = 'incremental-approach'
+source = 'builtin://universal/token-efficiency/skills/incremental-approach/SKILL.md'
+commit = ''
+digest = 'sha256:ff56cbdc4813ee427a3b6f7d23f6b41b82b7c3cc8dc2b64ccd256a90e75e02f8'
+
+[[served]]
+name = 'iterate'
+source = ''
+commit = ''
+digest = 'sha256:5cb87728d1449fadda6d8557501fcc0823509c60a37058ce4d2dda123296f67c'
+
+[[served]]
+name = 'lint'
+source = ''
+commit = ''
+digest = 'sha256:6966bb084561a4fab96855eaba5119589261614e43184b9a26fcb152bf917b70'
+
+[[served]]
+name = 'owasp-quick-reference'
+source = 'builtin://universal/security/skills/owasp-quick-reference/SKILL.md'
+commit = ''
+digest = 'sha256:de4f3b595b88e88d7bff0c342b5253637d08d79b3baebe888bd465f133ff512c'
+
+[[served]]
+name = 'parallelize'
+source = ''
+commit = ''
+digest = 'sha256:2700d984ba10baa2e16ed19b48cc8fd5f7351776f2ce03f6712394d3912f91cb'
+
+[[served]]
+name = 'review'
+source = ''
+commit = ''
+digest = 'sha256:bcd889ddf6b28f7b27ac992f12ef5796d6c3a81e816925bfee7e731b6a399c09'
+
+[[served]]
+name = 'rust-conventions'
+source = 'builtin://languages/rust/skills/rust-conventions/SKILL.md'
+commit = ''
+digest = 'sha256:0a7c23c09a7fc29a7237fc838ab1491504f51f8d90fc114b52c1d914bf52214d'
+
+[[served]]
+name = 'task-runner'
+source = 'builtin://universal/token-efficiency/skills/task-runner/SKILL.md'
+commit = ''
+digest = 'sha256:9f3cadda648798b049869c463d7a69f6f7b5953bcad2a43ea02e645d1ec3e19b'
+
+[[served]]
+name = 'tdd-workflow'
+source = 'builtin://universal/testing/skills/tdd-workflow/SKILL.md'
+commit = ''
+digest = 'sha256:90ddeb170606792596979de6444904f88b5fbcdc52ea2462109401865d17f6ec'
+
+[[served]]
+name = 'test'
+source = ''
+commit = ''
+digest = 'sha256:5eee3e2963180ad41f82ab85a8c4589ad5ccf1b7a43a477b4410c407c97c2f83'
+
+[[served]]
+name = 'testing-conventions'
+source = 'builtin://universal/testing/skills/testing-conventions/SKILL.md'
+commit = ''
+digest = 'sha256:562385aa3c563ffbf327d6776932b43175052b00ec4418695ed6c50c335f1686'
+
+[[item]]
+kind = 'command'
+id = 'build'
+path = 'commands/build.md'
+digest = 'sha256:756cec47c213ef308584dbf9de9a9940b8dbac580c53cbe664ab000ed7e261cb'
+
+[[item]]
+kind = 'command'
+id = 'fix'
+path = 'commands/fix.md'
+digest = 'sha256:53f443745a8e9a1e20abeeb791d833a96cd9a6f4187fcd8558391d0a80dcb8f2'
+
+[[item]]
+kind = 'command'
+id = 'lint'
+path = 'commands/lint.md'
+digest = 'sha256:2b3eed579678540f3343ecf160cd614a3e4acb3335888634081fd67a3d713a22'
+
+[[item]]
+kind = 'command'
+id = 'review'
+path = 'commands/review.md'
+digest = 'sha256:56bec86d493a2f4eb132eb4473091c58f1104fbf78a5d74087d1abd5b675f28b'
+
+[[item]]
+kind = 'command'
+id = 'test'
+path = 'commands/test.md'
+digest = 'sha256:7ec4ee8f7ab1a81f63b0eaeb72745e26c1c914678741904289c46e8b3e27a0b5'
+
+[[item]]
+kind = 'context'
+id = 'architecture'
+path = 'context/architecture.md'
+digest = 'sha256:b88ff009dcef3082c2e07a5287826c282738a1b25114da97c8cdda573c59f069'
+
+[[item]]
+kind = 'context'
+id = 'development-setup'
+path = 'context/development-setup.md'
+digest = 'sha256:86a20e7cdb21a23d0ae573d783deace81939f6f1d22d6bc4e64634c9851504d2'
+
+[[item]]
+kind = 'context'
+id = 'poly'
+path = 'context/poly.md'
+digest = 'sha256:b379969e1b1464dc4d9d82f777a29ef975d789358c7eed9e63a86e9875504c61'
+
+[[item]]
+kind = 'rule'
+id = 'configuration-system'
+path = 'rules/configuration-system.md'
+digest = 'sha256:73cc4b3abd7a35e766dc5675b853bb931880986559bb5927d1cbae99b6e870e8'
+
+[[item]]
+kind = 'rule'
+id = 'cross-platform-distribution'
+path = 'rules/cross-platform-distribution.md'
+digest = 'sha256:58cd3aad74174ccb66028dc36176a9e8a5b2fbf63e6a1bba6019106c2ceeea8e'
+
+[[item]]
+kind = 'rule'
+id = 'github-actions-parsing'
+path = 'rules/github-actions-parsing.md'
+digest = 'sha256:50573c0f6cd4e1cb5a11ec1a7ca87a9851c14feeb1c38b326c5d62014575c69f'
+
+[[item]]
+kind = 'rule'
+id = 'metadata-cache-performance'
+path = 'rules/metadata-cache-performance.md'
+digest = 'sha256:f1438144967001b1ba1847b36005ea196e5d00b1a7c6c9fb8e0aff7b7b075e45'
+
+[[item]]
+kind = 'rule'
+id = 'update-policy-and-ignores'
+path = 'rules/update-policy-and-ignores.md'
+digest = 'sha256:0dc368706a14abe6d423ad31e5664f63d5ed60b111d48460b43d347e3ba285b6'
+
+[[item]]
+kind = 'rule'
+id = 'version-synchronization'
+path = 'rules/version-synchronization.md'
+digest = 'sha256:46e305afc7c5390357653e207626c638371af20d38562573af54aaedcfde6e50'

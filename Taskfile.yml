@@ -5,7 +5,7 @@ tasks:
     desc: "Fetch dependencies and install git hooks"
     cmds:
       - cargo fetch
-      - poly hooks install
+      - task: governance:hooks
 
   set-version:
     desc: "Set version across packages and docs (usage: task set-version -- 1.2.3)"
@@ -100,3 +100,26 @@ tasks:
         pnpm install --frozen-lockfile --ignore-scripts
         pnpm pack --dry-run
       - python3 -m compileall pip-package/gh_actions_updater
+
+  governance:generate:
+    desc: Generate native AI governance outputs
+    cmds:
+      - ai-rulez generate --no-local --strict-config
+
+  governance:check:
+    desc: Validate native AI governance and freshness
+    cmds:
+      - ai-rulez migrate okf --check
+      - ai-rulez validate --strict --no-local
+      - ai-rulez lock --check
+      - ai-rulez generate --check --no-local --strict-config
+
+  governance:hooks:
+    desc: Provision pinned native governance hooks
+    cmds:
+      - >-
+        python3 -c 'from pathlib import Path;
+        p = Path("poly.local.toml");
+        p.exists() or p.write_text("[hook_preferences]\nchannels = [\"system\"]\n")'
+      - poly hooks update
+      - poly hooks install

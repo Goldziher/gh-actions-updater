@@ -8,12 +8,12 @@ x-ai-rulez:
     priority: high
 ---
 
-# Project Architecture
+## Project Architecture
 
 `gh-actions-updater` is a Rust 2024 CLI package. The installed user command is
 `gau`, with a `ghau` alias for shells where `gau` is already taken.
 
-## Core Modules
+### Core Modules
 
 - `src/main.rs` — process entry point for `gau`.
 - `src/bin/ghau.rs` — entry point for the `ghau` alias.
@@ -29,7 +29,7 @@ x-ai-rulez:
 - `src/rewrite.rs` — safe byte-span rewrites and unified diff rendering.
 - `src/report.rs` — human/JSON report model and output.
 
-## Distribution
+### Distribution
 
 - Cargo package name: `gh-actions-updater`.
 - Installed binaries: `gau` and its `ghau` alias.
@@ -39,14 +39,14 @@ x-ai-rulez:
 - `.github/workflows/ci.yaml` — quality gates.
 - `.github/workflows/publish.yaml` — crates.io, GitHub release assets, Homebrew bottles, npm, and PyPI.
 
-## Runtime Model
+### Runtime Model
 
 The default command is non-mutating. It discovers GitHub Actions YAML files,
 extracts supported `uses:` references, validates schemas unless disabled,
 resolves metadata for update candidates, then reports updates. Files are written
 only when `--update` is passed and the reference has a safe byte span.
 
-## Generated Agent Tooling
+### Generated Agent Tooling
 
 `.ai-rulez/` is the source for generated agent instructions. Update these files
 first when project conventions change, then regenerate the downstream agent

@@ -8,12 +8,12 @@ x-ai-rulez:
     priority: critical
 ---
 
-# Metadata, Cache, And Performance
+## Metadata, Cache, And Performance
 
 `gau` is intended for the commit step and workspace-wide dry runs. It must be fast by
 default and careful with network access.
 
-## Metadata Fetching
+### Metadata Fetching
 
 - Fetch tag metadata for update candidates only.
 - Do not clone repositories for normal tag checks.
@@ -23,7 +23,7 @@ default and careful with network access.
   missing-ref handling.
 - Deduplicate metadata work by unique repository/ref/mode before fetching.
 
-## Cache
+### Cache
 
 - Store cache under the platform cache directory with `gh-actions-updater`
   appended unless overridden.
@@ -36,7 +36,7 @@ default and careful with network access.
 - Corrupt cache entries should be ignored and replaced when network fetches
   succeed.
 
-## Parallelism
+### Parallelism
 
 - Use Rayon for CPU/file work.
 - Default to Rayon available-core behavior.
@@ -45,7 +45,7 @@ default and careful with network access.
 - Do not parallelize writes to the same file. Group replacements per file and
   apply them deterministically.
 
-## Hot-Path Patterns
+### Hot-Path Patterns
 
 - Use `ahash` for hot maps/sets.
 - Use `memchr`/byte prechecks before YAML parsing where possible.
