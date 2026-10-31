@@ -14,8 +14,8 @@ x-ai-rulez:
 
 - Rust 1.85+ with edition 2024 support.
 - Cargo and rustfmt/clippy.
-- Node.js 18+ and pnpm 12 for the npm wrapper.
-- Python 3.11+ for PyPI wrapper validation.
+- mise: `mise install` provides the locked node, pnpm, python, poly and cargo
+  tools; `mise run lint|test|build|package` wrap the commands below.
 - GoReleaser for release-config checks.
 - `jq`, `gh`, and npm auth for release/publish smoke work.
 

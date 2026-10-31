@@ -34,7 +34,8 @@ configured excludes when CLI excludes are present.
 
 - `[scan]`: `include`, `exclude`, `recursive`
 - `[cache]`: `enabled`, `ttl`, `dir`
-- `[update]`: `mode`, `exclude`, `include_prereleases`, `preserve_major`, `missing_ref`
+- `[update]`: `mode`, `pin_style`, `exclude`, `include_prereleases`, `preserve_major`, `missing_ref`,
+  `allow_full`
 - `[output]`: `format`, `color`
 - `[github]`: `api_url`
 - `[performance]`: `threads`

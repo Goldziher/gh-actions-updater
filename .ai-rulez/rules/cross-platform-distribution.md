@@ -42,10 +42,14 @@ Homebrew bottles are produced by the `Goldziher/homebrew-tap` bottle workflow.
 
 ### Integrations
 
-- The composite GitHub Action exposes bounded `check` and `update` operations.
+- The composite GitHub Action exposes bounded `check`, `update` and `lint-pins`
+  operations and a `pin-style` input (`preserve` defers to config).
 - The Action installer verifies release archives against `checksums.txt`.
-- pre-commit and Poly publish `gh-actions-updater-check` and
-  `gh-actions-updater-update`; the legacy pre-commit id aliases update.
+- pre-commit and Poly publish `gh-actions-updater-check`, `-update`,
+  `-major-check`, `-major-update` (`--latest-tag --pin-style major`) and
+  `-lint-pins`; the legacy pre-commit id aliases update. Poly hooks offer
+  `system`, `npm` (`npx -y gh-actions-updater@<version>`) and `cargo` channels,
+  pinned to the Cargo version by `mise run set-version`.
 - Stable releases move `v0` only after every required archive and checksum is
   present and the release is published.
 

@@ -57,6 +57,20 @@ Inline ignore comments suppress updates for that single `uses:` line:
 Ignore/exclude behavior should prevent metadata fetches when possible, but it
 should not hide the reference from scan output.
 
+### Major-Pin Lint
+
+`--lint-pins` is offline: no metadata fetch, no cache, no schema validation. It
+fails (exit 1) on every remote or reusable-workflow ref that is not a floating
+major tag (`vN`, or `N` for upstreams tagging without `v`): SHAs, `vN.N`,
+`vN.N.N`, branches and other refs. Local `./` and `docker://` refs are skipped,
+`# gau: ignore` exempts a line, every YAML document is scanned, and an aliased
+step is reported once.
+
+`[update] allow_full` permits a full version tag (never a SHA or branch) for
+actions whose upstream publishes no major tag. Entries are case-insensitive
+globs on `owner/repo` or `owner/repo/path`; `*` does not cross `/`, and a repo
+entry covers its sub-paths. Update-only flags conflict with `--lint-pins`.
+
 ### Rewrites And Diffs
 
 - Rewrite only safe byte spans.
