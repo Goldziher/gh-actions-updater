@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here.
 
+## [0.3.1] - 2026-10-31
+
+### Changed
+
+- Updated the repository's own workflow references to the latest major
+  releases. SHA pins now track `dtolnay/rust-toolchain` `v1`, `Swatinem/rust-cache`
+  `v2.9.3`, `actions/setup-python` `v7.1.0`, `rust-lang/crates-io-auth-action`
+  `v1.0.6`, `pypa/gh-action-pypi-publish` `v1.14.3`, and `xberg-io/actions`
+  `v1.38.0`.
+- The validation reusable workflow now floats on `xberg-io/actions@v1` instead
+  of a fixed patch tag.
+- Bumped `jsonschema` to 0.60, `saphyr` to 0.3, and `ureq` to 3.5.
+
 ## [0.3.0] - 2026-09-28
 
 ### Added

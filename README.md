@@ -278,7 +278,7 @@ JSON output includes:
 
 ```json
 {
-  "version": "0.3.0",
+  "version": "0.3.1",
   "changed": false,
   "would_change": false,
   "summary": {
@@ -344,7 +344,7 @@ required.
 ```yaml
 repos:
   - repo: https://github.com/Goldziher/gh-actions-updater
-    rev: v0.3.0
+    rev: v0.3.1
     hooks:
       - id: gh-actions-updater-check
 ```
@@ -364,7 +364,7 @@ This repository publishes `gh-actions-updater-check` and
 [[hooks.sources]]
 id = "gh-actions-updater"
 git = "https://github.com/Goldziher/gh-actions-updater.git"
-revision = "v0.3.0"
+revision = "v0.3.1"
 hooks = ["gh-actions-updater-check"]
 ```
 

@@ -2,7 +2,7 @@
 authors = ["Na'aman Hirschfeld <nhirschfeld@gmail.com>"]
 include = ["/Cargo.toml", "/Cargo.lock", "/src/**", "/README.md", "/LICENSE"]
 name = "gh-actions-updater"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 rust-version = "1.85"
 default-run = "gau"
