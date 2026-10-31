@@ -5,6 +5,7 @@ use crate::action_ref::{RefKind, ReferenceKind};
 use crate::cli::OutputFormat;
 use crate::config::Settings;
 use crate::scanner::{Diagnostic, DiagnosticCategory, ReferenceReport, ScanOutput};
+use ahash::AHashSet;
 use anyhow::{Context, Result};
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use serde::Serialize;
@@ -49,11 +50,17 @@ pub fn lint(settings: &Settings, scan: &ScanOutput) -> Result<LintReport> {
     let allow_full = build_allow_full(&settings.allow_full)?;
     let mut references_checked = 0;
     let mut findings = Vec::new();
+    // A YAML alias (`- *step`) resolves to the anchor's node, so the same ref is
+    // collected again at the anchor's line.
+    let mut seen = AHashSet::new();
     for reference in &scan.references {
         if !matches!(
             reference.parsed.kind,
             ReferenceKind::RemoteAction | ReferenceKind::ReusableWorkflow | ReferenceKind::Malformed
         ) {
+            continue;
+        }
+        if !seen.insert((reference.file.as_str(), reference.line, reference.raw.as_str())) {
             continue;
         }
         references_checked += 1;

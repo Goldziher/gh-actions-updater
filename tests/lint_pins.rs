@@ -314,3 +314,31 @@ jobs:
         "stdout: {stdout}"
     );
 }
+
+#[test]
+fn lint_pins_reports_an_aliased_step_once() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(temp.path().join(".git")).unwrap();
+    write(
+        &temp.path().join(".github/workflows/ci.yml"),
+        r#"on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - &checkout
+        uses: actions/checkout@main
+      - *checkout
+"#,
+    );
+
+    let output = lint_pins(temp.path(), &[]);
+
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout.matches("actions/checkout@main").count(), 1, "stdout: {stdout}");
+    assert!(
+        stdout.contains("1 pin finding(s) in 1 remote reference(s)"),
+        "stdout: {stdout}"
+    );
+}
