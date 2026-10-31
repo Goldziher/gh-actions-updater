@@ -64,39 +64,39 @@ when you want to scan it anyway.
 
 ## CLI Flags
 
-| Flag | Description |
-| --- | --- |
-| `--init` | Write an initial `.gh-actions-updater.toml`. |
-| `--force` | Allow `--init` to overwrite an existing config. |
-| `--output <PATH>` | Write `--init` config to a specific path. |
-| `-c, --config <PATH>` | Load a specific TOML config file. |
-| `--include <GLOB>` | Add an include glob. Repeatable. |
-| `--exclude <GLOB>` | Add an exclude glob. Repeatable. |
-| `-r, --recursive` | Scan nested `.github` folders under input directories, respecting `.gitignore`. |
-| `--threads <N>` | Override Rayon thread count. Default uses available CPU cores. |
-| `--cache-dir <PATH>` | Override the global cache directory. |
-| `--cache-ttl <DURATION>` | Cache TTL such as `15m`, `6h`, `7d`, `0`, or `never`. |
-| `--refresh-cache` | Ignore existing cache entries and fetch fresh metadata. |
-| `--no-cache` | Disable cache reads and writes. |
-| `--update` | Rewrite supported refs. |
-| `--latest` | Update tags as tags and SHA pins as SHAs. |
-| `--latest-tag` | Update eligible references to compatible tags; this is the default. |
-| `--latest-hash` | Pin update targets to commit SHAs instead of tags. |
-| `--pin-style <preserve\|major\|minor\|full>` | Control semver tag pin formatting. |
-| `--missing-ref <warn\|error\|ignore\|fallback>` | Policy for deleted or missing current refs. |
-| `--check` | Exit nonzero when updates are available. Does not rewrite files. |
-| `--dry-run` | Preview without writing. Implied unless `--update` is passed. |
-| `--diff` | Include unified diffs for proposed updates. |
-| `--format <human\|json>` | Select output format. |
-| `-q, --quiet` | Suppress non-error human output. |
-| `-v, --verbose` | Print cache details to stderr. |
-| `--color <auto\|always\|never>` | Control human output color. |
-| `--github-token <TOKEN>` | Use a GitHub token for metadata requests. |
-| `--github-api-url <URL>` | Use a GitHub-compatible API endpoint. |
-| `--strict-schema` | Treat schema diagnostics as failures. |
-| `--no-schema-validation` | Skip SchemaStore validation. |
-| `-h, --help` | Print help. |
-| `-V, --version` | Print version. |
+| Flag                                            | Description                                                                     |
+| ----------------------------------------------- | ------------------------------------------------------------------------------- |
+| `--init`                                        | Write an initial `.gh-actions-updater.toml`.                                    |
+| `--force`                                       | Allow `--init` to overwrite an existing config.                                 |
+| `--output <PATH>`                               | Write `--init` config to a specific path.                                       |
+| `-c, --config <PATH>`                           | Load a specific TOML config file.                                               |
+| `--include <GLOB>`                              | Add an include glob. Repeatable.                                                |
+| `--exclude <GLOB>`                              | Add an exclude glob. Repeatable.                                                |
+| `-r, --recursive`                               | Scan nested `.github` folders under input directories, respecting `.gitignore`. |
+| `--threads <N>`                                 | Override Rayon thread count. Default uses available CPU cores.                  |
+| `--cache-dir <PATH>`                            | Override the global cache directory.                                            |
+| `--cache-ttl <DURATION>`                        | Cache TTL such as `15m`, `6h`, `7d`, `0`, or `never`.                           |
+| `--refresh-cache`                               | Ignore existing cache entries and fetch fresh metadata.                         |
+| `--no-cache`                                    | Disable cache reads and writes.                                                 |
+| `--update`                                      | Rewrite supported refs.                                                         |
+| `--latest`                                      | Update tags as tags and SHA pins as SHAs.                                       |
+| `--latest-tag`                                  | Update eligible references to compatible tags; this is the default.             |
+| `--latest-hash`                                 | Pin update targets to commit SHAs instead of tags.                              |
+| `--pin-style <preserve\|major\|minor\|full>`    | Control semver tag pin formatting.                                              |
+| `--missing-ref <warn\|error\|ignore\|fallback>` | Policy for deleted or missing current refs.                                     |
+| `--check`                                       | Exit nonzero when updates are available. Does not rewrite files.                |
+| `--dry-run`                                     | Preview without writing. Implied unless `--update` is passed.                   |
+| `--diff`                                        | Include unified diffs for proposed updates.                                     |
+| `--format <human\|json>`                        | Select output format.                                                           |
+| `-q, --quiet`                                   | Suppress non-error human output.                                                |
+| `-v, --verbose`                                 | Print cache details to stderr.                                                  |
+| `--color <auto\|always\|never>`                 | Control human output color.                                                     |
+| `--github-token <TOKEN>`                        | Use a GitHub token for metadata requests.                                       |
+| `--github-api-url <URL>`                        | Use a GitHub-compatible API endpoint.                                           |
+| `--strict-schema`                               | Treat schema diagnostics as failures.                                           |
+| `--no-schema-validation`                        | Skip SchemaStore validation.                                                    |
+| `-h, --help`                                    | Print help.                                                                     |
+| `-V, --version`                                 | Print version.                                                                  |
 
 ## Configuration
 
@@ -204,11 +204,7 @@ Exclude specific remote actions or reusable workflows from updates in config:
 
 ```toml
 [update]
-exclude = [
-  "actions/checkout",
-  "docker/*",
-  "owner/repo/.github/workflows/deploy.yml@v*",
-]
+exclude = ["actions/checkout", "docker/*", "owner/repo/.github/workflows/deploy.yml@v*"]
 ```
 
 Inline ignores are also supported on the same line as a `uses:` value:
@@ -224,11 +220,11 @@ with non-preserve pin styles.
 
 Deleted or missing refs are controlled by `missing_ref`:
 
-| Policy | Behavior |
-| --- | --- |
-| `warn` | Report the missing ref and continue. |
-| `error` | Treat the missing ref as a failure. |
-| `ignore` | Suppress missing-ref diagnostics. |
+| Policy     | Behavior                                            |
+| ---------- | --------------------------------------------------- |
+| `warn`     | Report the missing ref and continue.                |
+| `error`    | Treat the missing ref as a failure.                 |
+| `ignore`   | Suppress missing-ref diagnostics.                   |
 | `fallback` | Allow normal update target selection and rewriting. |
 
 ## Cache And Performance
@@ -247,14 +243,14 @@ debugging or deterministic profiling.
 
 Cache behavior:
 
-| Flag/state | Behavior |
-| --- | --- |
-| Fresh hit | Use cached metadata. |
-| Stale hit | Refresh metadata; report-only mode may use stale data with a warning if refresh fails. |
-| `--refresh-cache` | Skip cache reads and write fresh entries after fetch. |
-| `--no-cache` | Fetch without reading or writing cache. |
-| `--cache-ttl 0` | Treat entries as stale. |
-| `--cache-ttl never` | Treat existing entries as fresh until refresh is requested. |
+| Flag/state          | Behavior                                                                               |
+| ------------------- | -------------------------------------------------------------------------------------- |
+| Fresh hit           | Use cached metadata.                                                                   |
+| Stale hit           | Refresh metadata; report-only mode may use stale data with a warning if refresh fails. |
+| `--refresh-cache`   | Skip cache reads and write fresh entries after fetch.                                  |
+| `--no-cache`        | Fetch without reading or writing cache.                                                |
+| `--cache-ttl 0`     | Treat entries as stale.                                                                |
+| `--cache-ttl never` | Treat existing entries as fresh until refresh is requested.                            |
 
 Normal latest-tag checks fetch tag metadata only. The tool does not clone
 repositories for tag checks.
@@ -323,17 +319,17 @@ Use the stable `v0` tag as a validation gate:
 Set `operation: update` to rewrite the checkout. The Action never commits or
 pushes changes.
 
-| Input | Default | Values or purpose |
-| --- | --- | --- |
-| `operation` | `check` | `check` validates without writing; `update` rewrites the checkout. |
-| `mode` | `latest` | `latest`, `latest-tag`, or `latest-hash`. |
-| `path` | `.` | Repository or workspace path to scan. |
-| `recursive` | `false` | Scan nested repositories and `.github` directories. |
-| `validate` | `true` | Verify remote and local references exist. |
-| `missing-ref` | `error` | `warn`, `error`, `ignore`, or `fallback`. |
-| `version` | `latest` | `gau` release version, with or without a `v` prefix. |
-| `cache` | `true` | Cache the installed binary on the runner. |
-| `github-token` | `${{ github.token }}` | Token used for release downloads and metadata requests. |
+| Input          | Default               | Values or purpose                                                  |
+| -------------- | --------------------- | ------------------------------------------------------------------ |
+| `operation`    | `check`               | `check` validates without writing; `update` rewrites the checkout. |
+| `mode`         | `latest`              | `latest`, `latest-tag`, or `latest-hash`.                          |
+| `path`         | `.`                   | Repository or workspace path to scan.                              |
+| `recursive`    | `false`               | Scan nested repositories and `.github` directories.                |
+| `validate`     | `true`                | Verify remote and local references exist.                          |
+| `missing-ref`  | `error`               | `warn`, `error`, `ignore`, or `fallback`.                          |
+| `version`      | `latest`              | `gau` release version, with or without a `v` prefix.               |
+| `cache`        | `true`                | Cache the installed binary on the runner.                          |
+| `github-token` | `${{ github.token }}` | Token used for release downloads and metadata requests.            |
 
 The Action exposes `version` and `install-dir` outputs. Pin the Action to an
 exact release instead of `v0` when immutable workflow dependencies are
@@ -381,14 +377,14 @@ and commit the resulting `poly-hooks.lock`.
 
 ## Exit Codes
 
-| Code | Meaning |
-| --- | --- |
-| `0` | Completed successfully. |
-| `1` | `--check` found updates or missing-ref policy requested a check failure. |
-| `2` | Invalid CLI arguments, config, init, cache setup, or thread setup. |
-| `3` | File discovery, parsing, or strict schema validation failed. |
-| `4` | Metadata lookup failed and no usable cache entry exists. |
-| `5` | File rewrite failed. |
+| Code | Meaning                                                                  |
+| ---- | ------------------------------------------------------------------------ |
+| `0`  | Completed successfully.                                                  |
+| `1`  | `--check` found updates or missing-ref policy requested a check failure. |
+| `2`  | Invalid CLI arguments, config, init, cache setup, or thread setup.       |
+| `3`  | File discovery, parsing, or strict schema validation failed.             |
+| `4`  | Metadata lookup failed and no usable cache entry exists.                 |
+| `5`  | File rewrite failed.                                                     |
 
 ## Release
 

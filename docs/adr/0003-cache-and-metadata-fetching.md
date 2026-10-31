@@ -26,13 +26,13 @@ Cache flag behavior:
 
 Freshness behavior:
 
-| State | Behavior |
-| --- | --- |
-| Fresh cache hit | Use cached metadata. |
-| Stale cache hit | Refresh conditionally. If refresh fails, report-only mode may use stale data with a warning. |
-| Stale cache hit with `--check` or `--update` | Refresh conditionally. If refresh fails, exit `4`. |
-| `--refresh-cache` | Skip cache reads, fetch metadata, write fresh entries, or exit `4`. |
-| `--no-cache` | Fetch metadata without reading or writing cache, or exit `4`. |
+| State                                        | Behavior                                                                                     |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Fresh cache hit                              | Use cached metadata.                                                                         |
+| Stale cache hit                              | Refresh conditionally. If refresh fails, report-only mode may use stale data with a warning. |
+| Stale cache hit with `--check` or `--update` | Refresh conditionally. If refresh fails, exit `4`.                                           |
+| `--refresh-cache`                            | Skip cache reads, fetch metadata, write fresh entries, or exit `4`.                          |
+| `--no-cache`                                 | Fetch metadata without reading or writing cache, or exit `4`.                                |
 
 Cache keys use `blake3` over:
 
