@@ -38,20 +38,17 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
 
+      # No rust-toolchain.toml: the crate builds on stable, which this action installs. ~keep
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+      - name: Setup mise
+        uses: xberg-io/actions/setup-mise@v1
         with:
-          version: "12.11.2"
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: "20"
+          install-args: node
+          config-ref: ${{ github.sha }}
 
       - name: Extract version from tag
         id: version
@@ -225,6 +222,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
 
+      # No rust-toolchain.toml: the crate builds on stable, which this action installs. ~keep
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@v1
         with:
@@ -404,6 +402,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
 
+      # No rust-toolchain.toml: the crate builds on stable, which this action installs. ~keep
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@v1
         with:
@@ -442,18 +441,11 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+      - name: Setup mise
+        uses: xberg-io/actions/setup-mise@v1
         with:
-          version: "12.11.2"
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-          registry-url: "https://registry.npmjs.org"
-          cache: "pnpm"
-          cache-dependency-path: npm-package/pnpm-lock.yaml
+          install-args: node pnpm
+          config-ref: ${{ github.sha }}
 
       - name: Publish to npm
         run: |
@@ -481,10 +473,11 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
 
-      - name: Setup Python
-        uses: actions/setup-python@v7
+      - name: Setup mise
+        uses: xberg-io/actions/setup-mise@v1
         with:
-          python-version: "3.11"
+          install-args: python
+          config-ref: ${{ github.sha }}
 
       - name: Build Python package
         run: |

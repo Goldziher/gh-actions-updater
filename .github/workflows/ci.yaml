@@ -17,6 +17,13 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  toolchain:
+    name: Toolchain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: xberg-io/actions/check-toolchain@v1
+
   validate:
     uses: xberg-io/actions/.github/workflows/reusable-validate.yml@v1
     with:
@@ -29,6 +36,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # No rust-toolchain.toml: the crate builds on stable, which this action installs. ~keep
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@v1
         with:
@@ -38,47 +46,22 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+      - name: Setup mise
+        uses: xberg-io/actions/setup-mise@v1
         with:
-          version: "12.11.2"
+          install-args: node pnpm python
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: "20"
-          cache: "pnpm"
-          cache-dependency-path: npm-package/pnpm-lock.yaml
-
-      - name: Setup Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.11"
-
-      - name: Check Rust formatting
-        run: cargo fmt --all --check
+      - name: Check Rust formatting and clippy
+        run: mise run lint
 
       - name: Check Rust targets
         run: cargo check --locked --all-targets --all-features
 
-      - name: Run clippy
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
-
       - name: Run Rust tests
-        run: cargo test --locked --all-targets --all-features
+        run: mise run test
 
-      - name: Check cargo package
-        run: cargo package --locked
-
-      - name: Check npm wrapper syntax and package contents
-        run: |
-          set -euo pipefail
-          node --check npm-package/index.js
-          node --check npm-package/install.js
-          node --check npm-package/bin/gau
-          cd npm-package
-          pnpm install --frozen-lockfile --ignore-scripts
-          pnpm pack --dry-run
+      - name: Check cargo, npm and Python packages
+        run: mise run package
 
       - name: Check Python wrapper syntax and package build
         run: |
@@ -99,13 +82,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Setup Go
-        uses: actions/setup-go@v7
+      - name: Setup mise
+        uses: xberg-io/actions/setup-mise@v1
         with:
-          go-version: "1.26"
-
-      - name: Install actionlint
-        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          install-args: actionlint
 
       - name: Run actionlint
         run: actionlint
@@ -121,6 +101,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # No rust-toolchain.toml: the crate builds on stable, which this action installs. ~keep
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@v1
         with:
@@ -129,5 +110,11 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
 
+      - name: Setup mise
+        uses: xberg-io/actions/setup-mise@v1
+        with:
+          # The test task needs only mise and the Rust toolchain; install no mise tool. ~keep
+          install: "false"
+
       - name: Run tests
-        run: cargo test --locked --all-targets --all-features
+        run: mise run test
