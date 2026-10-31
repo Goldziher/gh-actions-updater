@@ -1,0 +1,20 @@
+# Versions follow the xberg-io/toolchains baseline named in toolchains.toml. Rust comes from rustup's stable
+# channel (CI: dtolnay/rust-toolchain), not here. ~keep
+[settings]
+lockfile = true
+lockfile_platforms = ["linux-x64", "linux-arm64", "macos-arm64", "windows-x64"]
+# CI installs only the tools a job needs; `mise run` must not install the rest behind its back. ~keep
+task.run_auto_install = false
+
+[tools]
+"github:Goldziher/poly" = "0.31.2"
+node = "26.12.1"
+pnpm = "12.15.0"
+python = "3.13.18"
+cargo-deny = "0.20.2"
+"github:bnjbvr/cargo-machete" = "0.9.2"
+"github:DevinR528/cargo-sort" = "2.1.4"
+actionlint = "1.7.12"
+
+[task_config]
+includes = ["mise-tasks", "mise-tasks/shared.toml"]
