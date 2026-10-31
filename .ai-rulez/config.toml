@@ -12,3 +12,9 @@ self_server_command = ["ai-rulez", "mcp"]
 
 [lock]
 include_outputs = false
+
+[lint]
+allow_overrides = ["claude:review"]
+
+[lint.builtin_names]
+allow = ["opencode:review"]
