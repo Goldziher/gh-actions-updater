@@ -14,6 +14,30 @@
   pass_filenames: false
   always_run: true
   stages: [pre-commit]
+- id: gh-actions-updater-major-check
+  name: gh-actions-updater major-pin check
+  description: Fail unless every GitHub Actions reference is on its latest major tag.
+  entry: gau --latest-tag --pin-style major --check --validate --missing-ref error
+  language: rust
+  pass_filenames: false
+  always_run: true
+  stages: [pre-commit]
+- id: gh-actions-updater-major-update
+  name: gh-actions-updater major-pin update
+  description: Rewrite GitHub Actions references to their latest major tag.
+  entry: gau --latest-tag --pin-style major --update --validate --missing-ref error
+  language: rust
+  pass_filenames: false
+  always_run: true
+  stages: [pre-commit]
+- id: gh-actions-updater-lint-pins
+  name: gh-actions-updater lint pins
+  description: Offline check that every GitHub Actions reference is a bare vN major tag.
+  entry: gau --lint-pins
+  language: rust
+  pass_filenames: false
+  always_run: true
+  stages: [pre-commit]
 - id: gh-actions-updater
   name: gh-actions-updater (legacy update alias)
   description: Backward-compatible alias for gh-actions-updater-update.

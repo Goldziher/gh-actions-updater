@@ -12,6 +12,10 @@ channel = "system"
 check = "command -v gau"
 run = "gau"
 [[hooks.paths]]
+channel = "npm"
+check = "command -v npx"
+run = "npx -y gh-actions-updater@0.3.1"
+[[hooks.paths]]
 channel = "cargo"
 check = "test -x \"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
 install = "cargo install --locked gh-actions-updater --version 0.3.1"
@@ -28,6 +32,73 @@ always_run = true
 channel = "system"
 check = "command -v gau"
 run = "gau"
+[[hooks.paths]]
+channel = "npm"
+check = "command -v npx"
+run = "npx -y gh-actions-updater@0.3.1"
+[[hooks.paths]]
+channel = "cargo"
+check = "test -x \"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
+install = "cargo install --locked gh-actions-updater --version 0.3.1"
+run = "\"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
+
+[[hooks]]
+id = "gh-actions-updater-major-check"
+stages = ["pre-commit"]
+args = ["--latest-tag", "--pin-style", "major", "--check", "--validate", "--missing-ref", "error"]
+workspace = true
+pass_filenames = false
+always_run = true
+[[hooks.paths]]
+channel = "system"
+check = "command -v gau"
+run = "gau"
+[[hooks.paths]]
+channel = "npm"
+check = "command -v npx"
+run = "npx -y gh-actions-updater@0.3.1"
+[[hooks.paths]]
+channel = "cargo"
+check = "test -x \"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
+install = "cargo install --locked gh-actions-updater --version 0.3.1"
+run = "\"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
+
+[[hooks]]
+id = "gh-actions-updater-major-update"
+stages = ["pre-commit"]
+args = ["--latest-tag", "--pin-style", "major", "--update", "--validate", "--missing-ref", "error"]
+workspace = true
+pass_filenames = false
+always_run = true
+[[hooks.paths]]
+channel = "system"
+check = "command -v gau"
+run = "gau"
+[[hooks.paths]]
+channel = "npm"
+check = "command -v npx"
+run = "npx -y gh-actions-updater@0.3.1"
+[[hooks.paths]]
+channel = "cargo"
+check = "test -x \"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
+install = "cargo install --locked gh-actions-updater --version 0.3.1"
+run = "\"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
+
+[[hooks]]
+id = "gh-actions-updater-lint-pins"
+stages = ["pre-commit"]
+args = ["--lint-pins"]
+workspace = true
+pass_filenames = false
+always_run = true
+[[hooks.paths]]
+channel = "system"
+check = "command -v gau"
+run = "gau"
+[[hooks.paths]]
+channel = "npm"
+check = "command -v npx"
+run = "npx -y gh-actions-updater@0.3.1"
 [[hooks.paths]]
 channel = "cargo"
 check = "test -x \"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""

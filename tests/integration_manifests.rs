@@ -5,6 +5,32 @@ use std::path::PathBuf;
 
 const CHECK_ARGUMENTS: &[&str] = &["--latest", "--check", "--validate", "--missing-ref", "error"];
 const UPDATE_ARGUMENTS: &[&str] = &["--latest", "--update", "--validate", "--missing-ref", "error"];
+const MAJOR_CHECK_ARGUMENTS: &[&str] = &[
+    "--latest-tag",
+    "--pin-style",
+    "major",
+    "--check",
+    "--validate",
+    "--missing-ref",
+    "error",
+];
+const MAJOR_UPDATE_ARGUMENTS: &[&str] = &[
+    "--latest-tag",
+    "--pin-style",
+    "major",
+    "--update",
+    "--validate",
+    "--missing-ref",
+    "error",
+];
+const LINT_PINS_ARGUMENTS: &[&str] = &["--lint-pins"];
+const HOOKS: &[(&str, &[&str])] = &[
+    ("gh-actions-updater-check", CHECK_ARGUMENTS),
+    ("gh-actions-updater-update", UPDATE_ARGUMENTS),
+    ("gh-actions-updater-major-check", MAJOR_CHECK_ARGUMENTS),
+    ("gh-actions-updater-major-update", MAJOR_UPDATE_ARGUMENTS),
+    ("gh-actions-updater-lint-pins", LINT_PINS_ARGUMENTS),
+];
 
 fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -26,11 +52,8 @@ fn should_expose_check_update_and_legacy_pre_commit_hooks() {
     let content = fs::read_to_string(repository_root().join(".pre-commit-hooks.yaml")).unwrap();
     let documents = Yaml::load_from_str(&content).unwrap();
     let hooks = documents[0].as_sequence().unwrap();
-    let expected = [
-        ("gh-actions-updater-check", CHECK_ARGUMENTS),
-        ("gh-actions-updater-update", UPDATE_ARGUMENTS),
-        ("gh-actions-updater", UPDATE_ARGUMENTS),
-    ];
+    let mut expected = HOOKS.to_vec();
+    expected.push(("gh-actions-updater", UPDATE_ARGUMENTS));
     assert_eq!(hooks.len(), expected.len());
 
     for (expected_id, expected_arguments) in expected {
@@ -74,16 +97,13 @@ fn should_expose_semantic_check_and_update_poly_hooks() {
     let content = fs::read_to_string(repository_root().join("poly-hooks.toml")).unwrap();
     let manifest: PolyManifest = toml::from_str(&content).unwrap();
     assert_eq!(manifest.version, 1);
-    assert_eq!(manifest.hooks.len(), 2);
+    assert_eq!(manifest.hooks.len(), HOOKS.len());
 
     let cargo_toml = fs::read_to_string(repository_root().join("Cargo.toml")).unwrap();
     let cargo_toml: toml::Value = toml::from_str(&cargo_toml).unwrap();
     let version = cargo_toml["package"]["version"].as_str().unwrap();
 
-    for (expected_id, expected_arguments) in [
-        ("gh-actions-updater-check", CHECK_ARGUMENTS),
-        ("gh-actions-updater-update", UPDATE_ARGUMENTS),
-    ] {
+    for &(expected_id, expected_arguments) in HOOKS {
         let hook = manifest
             .hooks
             .iter()
@@ -97,6 +117,10 @@ fn should_expose_semantic_check_and_update_poly_hooks() {
         let system = hook.paths.iter().find(|path| path.channel == "system").unwrap();
         assert_eq!(system.run, "gau");
         assert_eq!(system.install, None);
+
+        let npm = hook.paths.iter().find(|path| path.channel == "npm").unwrap();
+        assert_eq!(npm.run, format!("npx -y gh-actions-updater@{version}"));
+        assert_eq!(npm.install, None);
 
         let cargo_path = hook.paths.iter().find(|path| path.channel == "cargo").unwrap();
         assert!(cargo_path.run.ends_with("/bin/gau\""));

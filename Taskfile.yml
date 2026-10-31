@@ -55,6 +55,15 @@ tasks:
 
         replace("README.md", r'"version": ".*"', f'"version": "{version}"')
         replace("README.md", r"rev: v[0-9][^\n]*", f"rev: v{version}")
+        replace("README.md", r'revision = "v[0-9][^"]*"', f'revision = "v{version}"')
+
+        hooks = Path("poly-hooks.toml")
+        text = hooks.read_text(encoding="utf-8")
+        new = re.sub(r"gh-actions-updater@[0-9][^\s\"]*", f"gh-actions-updater@{version}", text)
+        new = re.sub(r"gh-actions-updater --version [0-9][^\s\"]*", f"gh-actions-updater --version {version}", new)
+        if new.count(version) < 2 * text.count("[[hooks]]"):
+            raise SystemExit("hook channel versions not found in poly-hooks.toml")
+        hooks.write_text(new, encoding="utf-8")
 
         lock = Path("Cargo.lock")
         text = lock.read_text(encoding="utf-8")
