@@ -27,15 +27,15 @@ dirs = "7"
 glob = "0.3"
 globset = "0.4"
 ignore = "0.4"
-jsonschema = { version = "0.58", default-features = false }
+jsonschema = { version = "0.60", default-features = false }
 memchr = "2"
 rayon = "1"
-saphyr = "0.1.0"
+saphyr = "0.3.3"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1.1"
-ureq = { version = "3.4", features = ["json"] }
+ureq = { version = "3.5", features = ["json"] }
 
 [dev-dependencies]
 tempfile = "3"
