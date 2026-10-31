@@ -6,7 +6,7 @@ use crate::cli::OutputFormat;
 use crate::config::Settings;
 use crate::scanner::{Diagnostic, DiagnosticCategory, ReferenceReport, ScanOutput};
 use anyhow::{Context, Result};
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use serde::Serialize;
 use std::io::Write;
 
@@ -129,14 +129,20 @@ fn is_bare_major(ref_name: &str) -> bool {
 fn build_allow_full(patterns: &[String]) -> Result<GlobSet> {
     let mut builder = GlobSetBuilder::new();
     for pattern in patterns {
-        builder.add(Glob::new(pattern).with_context(|| format!("invalid allow_full glob {pattern}"))?);
+        let glob = GlobBuilder::new(pattern)
+            .literal_separator(true)
+            .case_insensitive(true)
+            .build()
+            .with_context(|| format!("invalid allow_full glob {pattern}"))?;
+        builder.add(glob);
     }
     builder.build().context("failed to build allow_full glob set")
 }
 
 /// Matches the action target without its ref (`owner/repo` or
 /// `owner/repo/path`), and also `owner/repo` alone so an allowlisted repo covers
-/// its sub-actions and reusable workflows.
+/// its sub-actions and reusable workflows. `*` does not cross `/`, and GitHub
+/// owner and repo names are case-insensitive.
 fn is_allowed_full(allow_full: &GlobSet, raw: &str) -> bool {
     let target = raw.rsplit_once('@').map_or(raw, |(target, _)| target);
     let repo = target.splitn(3, '/').take(2).collect::<Vec<_>>().join("/");
@@ -179,6 +185,13 @@ mod tests {
     use super::{build_allow_full, is_allowed_full, is_bare_major};
 
     #[test]
+    fn allow_full_star_does_not_cross_path_separators() {
+        let set = build_allow_full(&["*/setup-*".to_string()]).unwrap();
+        assert!(is_allowed_full(&set, "astral-sh/setup-uv@v10.3.3"));
+        assert!(!is_allowed_full(&set, "o/r/x/setup-y@v1.2.3"));
+    }
+
+    #[test]
     fn bare_major_accepts_only_v_and_digits() {
         assert!(is_bare_major("v4"));
         assert!(is_bare_major("v10"));
@@ -198,6 +211,7 @@ mod tests {
         assert!(!is_allowed_full(&set, "owner/repository@v1.2.3"));
 
         let path_only = build_allow_full(&["owner/repo/sub".to_string()]).unwrap();
+        assert!(is_allowed_full(&path_only, "Owner/Repo/sub@v1.2.3"));
         assert!(is_allowed_full(&path_only, "owner/repo/sub@v1.2.3"));
         assert!(!is_allowed_full(&path_only, "owner/repo@v1.2.3"));
     }

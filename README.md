@@ -238,8 +238,9 @@ prints a JSON report with `--format json`. Local `./` refs and `docker://` image
 are skipped, and `# gau: ignore` on the `uses:` line exempts a reference.
 
 Some actions publish no major tag. List them in `allow_full` to permit a full
-version tag (never a SHA or branch); entries are globs matched against
-`owner/repo` or `owner/repo/path`:
+version tag (never a SHA or branch). Entries are case-insensitive globs matched
+against `owner/repo` or `owner/repo/path`, where `*` does not cross `/`. A repo
+entry also covers its sub-actions and reusable workflows (`owner/repo/path`):
 
 ```toml
 [update]
