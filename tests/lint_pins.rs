@@ -80,23 +80,31 @@ fn lint_pins_reports_every_non_major_ref_and_exits_one() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8(output.stdout).unwrap();
-    let workflow = Path::new(".github/workflows/ci.yml").display().to_string();
-    let action = Path::new(".github/actions/build/action.yml").display().to_string();
+    // The scan walks `.` and joins with the native separator, so a Windows path reads `.\.github\...`.
+    let native = |parts: &[&str]| {
+        parts
+            .iter()
+            .fold(Path::new(".").to_path_buf(), |path, part| path.join(part))
+    };
+    let workflow = native(&[".github", "workflows", "ci.yml"]).display().to_string();
+    let action = native(&[".github", "actions", "build", "action.yml"])
+        .display()
+        .to_string();
     let lines: Vec<&str> = stdout.lines().filter(|line| line.contains(": ")).collect();
     assert_eq!(
         lines,
         vec![
-            format!("./{action}:6: actions/download-artifact@v4.1.8: full version tag; pin the major tag v4").as_str(),
+            format!("{action}:6: actions/download-artifact@v4.1.8: full version tag; pin the major tag v4").as_str(),
             format!(
-                "./{workflow}:4: octo-org/ci/.github/workflows/reuse.yml@v1.2.3: full version tag; pin the major tag v1"
+                "{workflow}:4: octo-org/ci/.github/workflows/reuse.yml@v1.2.3: full version tag; pin the major tag v1"
             )
             .as_str(),
-            format!("./{workflow}:8: actions/checkout@{SHA}: commit SHA; pin a vN major tag").as_str(),
-            format!("./{workflow}:9: actions/setup-node@v4.1: full version tag; pin the major tag v4").as_str(),
-            format!("./{workflow}:10: actions/cache@v4.2.0: full version tag; pin the major tag v4").as_str(),
-            format!("./{workflow}:11: dtolnay/rust-toolchain@stable: branch or non-version ref; pin a vN major tag")
+            format!("{workflow}:8: actions/checkout@{SHA}: commit SHA; pin a vN major tag").as_str(),
+            format!("{workflow}:9: actions/setup-node@v4.1: full version tag; pin the major tag v4").as_str(),
+            format!("{workflow}:10: actions/cache@v4.2.0: full version tag; pin the major tag v4").as_str(),
+            format!("{workflow}:11: dtolnay/rust-toolchain@stable: branch or non-version ref; pin a vN major tag")
                 .as_str(),
-            format!("./{workflow}:12: github/codeql-action/init@main: branch or non-version ref; pin a vN major tag")
+            format!("{workflow}:12: github/codeql-action/init@main: branch or non-version ref; pin a vN major tag")
                 .as_str(),
         ],
         "stdout: {stdout}"
