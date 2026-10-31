@@ -23,12 +23,12 @@ poly.local.toml
 .claude/skills/
 .codex/agents/
 .codex/config.toml
+.mcp.json
 .opencode/agents/
 .opencode/commands/
 .pi/agents/
 .pi/prompts/
-/.mcp.json
-/AGENTS.md
-/CLAUDE.md
-/opencode.json
+AGENTS.md
+CLAUDE.md
+opencode.json
 # END ai-rulez
