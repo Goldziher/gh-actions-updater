@@ -303,7 +303,7 @@ JSON output includes:
 
 ```json
 {
-  "version": "0.3.1",
+  "version": "0.4.0",
   "changed": false,
   "would_change": false,
   "summary": {
@@ -370,7 +370,7 @@ required.
 ```yaml
 repos:
   - repo: https://github.com/Goldziher/gh-actions-updater
-    rev: v0.3.1
+    rev: v0.4.0
     hooks:
       - id: gh-actions-updater-check
 ```
@@ -394,7 +394,7 @@ This repository publishes the same hooks as pre-commit through
 [[hooks.sources]]
 id = "gh-actions-updater"
 git = "https://github.com/Goldziher/gh-actions-updater.git"
-revision = "v0.3.1"
+revision = "v0.4.0"
 hooks = ["gh-actions-updater-lint-pins"]
 ```
 

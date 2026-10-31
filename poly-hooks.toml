@@ -14,11 +14,11 @@ run = "gau"
 [[hooks.paths]]
 channel = "npm"
 check = "command -v npx"
-run = "npx -y gh-actions-updater@0.3.1"
+run = "npx -y gh-actions-updater@0.4.0"
 [[hooks.paths]]
 channel = "cargo"
 check = "test -x \"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
-install = "cargo install --locked gh-actions-updater --version 0.3.1"
+install = "cargo install --locked gh-actions-updater --version 0.4.0"
 run = "\"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
 
 [[hooks]]
@@ -35,11 +35,11 @@ run = "gau"
 [[hooks.paths]]
 channel = "npm"
 check = "command -v npx"
-run = "npx -y gh-actions-updater@0.3.1"
+run = "npx -y gh-actions-updater@0.4.0"
 [[hooks.paths]]
 channel = "cargo"
 check = "test -x \"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
-install = "cargo install --locked gh-actions-updater --version 0.3.1"
+install = "cargo install --locked gh-actions-updater --version 0.4.0"
 run = "\"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
 
 [[hooks]]
@@ -56,11 +56,11 @@ run = "gau"
 [[hooks.paths]]
 channel = "npm"
 check = "command -v npx"
-run = "npx -y gh-actions-updater@0.3.1"
+run = "npx -y gh-actions-updater@0.4.0"
 [[hooks.paths]]
 channel = "cargo"
 check = "test -x \"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
-install = "cargo install --locked gh-actions-updater --version 0.3.1"
+install = "cargo install --locked gh-actions-updater --version 0.4.0"
 run = "\"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
 
 [[hooks]]
@@ -77,11 +77,11 @@ run = "gau"
 [[hooks.paths]]
 channel = "npm"
 check = "command -v npx"
-run = "npx -y gh-actions-updater@0.3.1"
+run = "npx -y gh-actions-updater@0.4.0"
 [[hooks.paths]]
 channel = "cargo"
 check = "test -x \"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
-install = "cargo install --locked gh-actions-updater --version 0.3.1"
+install = "cargo install --locked gh-actions-updater --version 0.4.0"
 run = "\"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
 
 [[hooks]]
@@ -98,9 +98,9 @@ run = "gau"
 [[hooks.paths]]
 channel = "npm"
 check = "command -v npx"
-run = "npx -y gh-actions-updater@0.3.1"
+run = "npx -y gh-actions-updater@0.4.0"
 [[hooks.paths]]
 channel = "cargo"
 check = "test -x \"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""
-install = "cargo install --locked gh-actions-updater --version 0.3.1"
+install = "cargo install --locked gh-actions-updater --version 0.4.0"
 run = "\"${CARGO_HOME:-$HOME/.cargo}/bin/gau\""

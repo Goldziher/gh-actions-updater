@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented here.
 
+## [0.4.0] - 2026-10-31
+
+### Added
+
+- `--lint-pins`: an offline check that fails on every remote `uses:` ref that is
+  not a bare `vN` major tag (SHA, `@vN.N`, `@vN.N.N`, branch or other), with
+  `--format json` output. `# gau: ignore` exempts a line.
+- `[update] allow_full` globs permit full version tags for actions whose upstream
+  publishes no major tag.
+- `gh-actions-updater-major-check`, `gh-actions-updater-major-update` and
+  `gh-actions-updater-lint-pins` hooks for pre-commit and poly. Every poly hook
+  gains an `npm` channel that runs the pinned release through `npx`.
+- The composite Action takes a `pin-style` input and a `lint-pins` operation.
+
+### Changed
+
+- The repository's own workflows and the Action's cache step pin bare major tags;
+  Dependabot no longer manages GitHub Actions.
+- Development tasks run with mise (`mise run <task>`) instead of go-task; tools
+  are locked in `mise.toml` and `mise.lock`. `governance:hooks` is now
+  `governance:hooks:install`.
+
 ## [0.3.1] - 2026-10-31
 
 ### Changed
