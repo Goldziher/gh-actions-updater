@@ -120,10 +120,12 @@ fn check_reference(reference: &ReferenceReport, allow_full: &GlobSet) -> Option<
     }
 }
 
+/// A floating major tag: `vN`, or `N` for upstreams that tag without the `v`.
+/// The full-tag suggestion keeps the ref's own prefix, so whatever it suggests
+/// passes this check.
 fn is_bare_major(ref_name: &str) -> bool {
-    ref_name
-        .strip_prefix('v')
-        .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()))
+    let digits = ref_name.strip_prefix('v').unwrap_or(ref_name);
+    !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn build_allow_full(patterns: &[String]) -> Result<GlobSet> {
@@ -192,11 +194,12 @@ mod tests {
     }
 
     #[test]
-    fn bare_major_accepts_only_v_and_digits() {
+    fn bare_major_accepts_v_prefixed_and_unprefixed_digits() {
         assert!(is_bare_major("v4"));
         assert!(is_bare_major("v10"));
         assert!(!is_bare_major("v4.1"));
-        assert!(!is_bare_major("4"));
+        assert!(is_bare_major("4"));
+        assert!(!is_bare_major(""));
         assert!(!is_bare_major("v"));
         assert!(!is_bare_major("v4-beta"));
         assert!(!is_bare_major("main"));

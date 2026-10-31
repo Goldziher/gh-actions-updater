@@ -235,7 +235,9 @@ Deleted or missing refs are controlled by `missing_ref`:
 without network access. It reports each SHA, `@vN.N`, `@vN.N.N`, branch, or other
 ref as `path:line: owner/repo@ref: reason`, exits `1` when it finds any, and
 prints a JSON report with `--format json`. Local `./` refs and `docker://` images
-are skipped, and `# gau: ignore` on the `uses:` line exempts a reference.
+are skipped, and `# gau: ignore` on the `uses:` line exempts a reference. An
+unprefixed major such as `@1` passes too, for upstreams that tag without a `v`;
+the suggested major keeps the ref's own prefix.
 
 Some actions publish no major tag. List them in `allow_full` to permit a full
 version tag (never a SHA or branch). Entries are case-insensitive globs matched

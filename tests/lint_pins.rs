@@ -247,3 +247,34 @@ fn lint_pins_exits_three_on_unparseable_yaml() {
     assert_eq!(output.status.code(), Some(3));
     assert!(String::from_utf8_lossy(&output.stderr).contains("failed to parse YAML"));
 }
+
+#[test]
+fn lint_pins_accepts_an_unprefixed_major_it_would_suggest() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(temp.path().join(".git")).unwrap();
+    write(
+        &temp.path().join(".github/workflows/ci.yml"),
+        r#"on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: octo-org/plain@1.2.3
+      - uses: octo-org/plain@1
+"#,
+    );
+
+    let output = lint_pins(temp.path(), &[]);
+
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("octo-org/plain@1.2.3: full version tag; pin the major tag 1\n"),
+        "stdout: {stdout}"
+    );
+    assert!(!stdout.contains("octo-org/plain@1:"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("1 pin finding(s) in 2 remote reference(s)"),
+        "stdout: {stdout}"
+    );
+}
