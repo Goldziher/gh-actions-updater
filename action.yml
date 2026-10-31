@@ -8,13 +8,17 @@ branding:
 
 inputs:
   operation:
-    description: "Operation to run: check or update."
+    description: "Operation to run: check, update, or lint-pins (offline; fails on any ref that is not vN)."
     required: false
     default: "check"
   mode:
     description: "Update selection mode: latest, latest-tag, or latest-hash."
     required: false
     default: "latest"
+  pin-style:
+    description: "Pin style: preserve (defer to config), major, minor, or full."
+    required: false
+    default: "preserve"
   path:
     description: "Repository or workspace path to scan."
     required: false
@@ -86,7 +90,7 @@ runs:
 
     - id: cache
       if: inputs.cache == 'true'
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      uses: actions/cache@v6
       with:
         path: ${{ steps.resolve.outputs.install-dir }}
         key: ${{ steps.resolve.outputs.cache-key }}
@@ -106,6 +110,7 @@ runs:
         GHAU_GITHUB_TOKEN: ${{ inputs.github-token }}
         INPUT_OPERATION: ${{ inputs.operation }}
         INPUT_MODE: ${{ inputs.mode }}
+        INPUT_PIN_STYLE: ${{ inputs.pin-style }}
         INPUT_PATH: ${{ inputs.path }}
         INPUT_RECURSIVE: ${{ inputs.recursive }}
         INPUT_VALIDATE: ${{ inputs.validate }}
@@ -113,12 +118,18 @@ runs:
         GHAU_BIN: ${{ steps.resolve.outputs.install-dir }}/${{ runner.os == 'Windows' && 'gau.exe' || 'gau' }}
       run: |
         set -euo pipefail
-        case "$INPUT_OPERATION" in check|update) ;; *) echo "::error::operation must be check or update" >&2; exit 2 ;; esac
+        case "$INPUT_OPERATION" in check|update|lint-pins) ;; *) echo "::error::operation must be check, update, or lint-pins" >&2; exit 2 ;; esac
         case "$INPUT_MODE" in latest|latest-tag|latest-hash) ;; *) echo "::error::unsupported mode: $INPUT_MODE" >&2; exit 2 ;; esac
+        case "$INPUT_PIN_STYLE" in preserve|major|minor|full) ;; *) echo "::error::unsupported pin-style: $INPUT_PIN_STYLE" >&2; exit 2 ;; esac
         case "$INPUT_MISSING_REF" in warn|error|ignore|fallback) ;; *) echo "::error::unsupported missing-ref policy: $INPUT_MISSING_REF" >&2; exit 2 ;; esac
         case "$INPUT_RECURSIVE" in true|false) ;; *) echo "::error::recursive must be true or false" >&2; exit 2 ;; esac
         case "$INPUT_VALIDATE" in true|false) ;; *) echo "::error::validate must be true or false" >&2; exit 2 ;; esac
-        args=("--${INPUT_OPERATION}" "--${INPUT_MODE}" "--missing-ref" "$INPUT_MISSING_REF")
+        if [ "$INPUT_OPERATION" = "lint-pins" ]; then
+          args=("--lint-pins")
+        else
+          args=("--${INPUT_OPERATION}" "--${INPUT_MODE}" "--missing-ref" "$INPUT_MISSING_REF")
+          [ "$INPUT_PIN_STYLE" != "preserve" ] && args+=("--pin-style" "$INPUT_PIN_STYLE")
+          [ "$INPUT_VALIDATE" = "true" ] && args+=("--validate")
+        fi
         [ "$INPUT_RECURSIVE" = "true" ] && args+=("--recursive")
-        [ "$INPUT_VALIDATE" = "true" ] && args+=("--validate")
         "$GHAU_BIN" "${args[@]}" "$INPUT_PATH"

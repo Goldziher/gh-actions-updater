@@ -153,6 +153,7 @@ fn should_expose_bounded_validation_gate_github_action() {
             "mode",
             "operation",
             "path",
+            "pin-style",
             "recursive",
             "validate",
             "version",
@@ -161,6 +162,7 @@ fn should_expose_bounded_validation_gate_github_action() {
 
     assert_eq!(yaml_string(yaml_value(inputs, "operation"), "default"), "check");
     assert_eq!(yaml_string(yaml_value(inputs, "mode"), "default"), "latest");
+    assert_eq!(yaml_string(yaml_value(inputs, "pin-style"), "default"), "preserve");
     assert_eq!(yaml_string(yaml_value(inputs, "validate"), "default"), "true");
     assert_eq!(yaml_string(yaml_value(inputs, "missing-ref"), "default"), "error");
 
@@ -171,10 +173,7 @@ fn should_expose_bounded_validation_gate_github_action() {
         .iter()
         .find(|step| step.as_mapping_get("id").and_then(Yaml::as_str) == Some("cache"))
         .expect("missing cache step");
-    assert_eq!(
-        yaml_string(cache_step, "uses"),
-        "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
-    );
+    assert_eq!(yaml_string(cache_step, "uses"), "actions/cache@v6");
     let installer_step = steps
         .iter()
         .find(|step| {
@@ -200,7 +199,7 @@ fn should_expose_bounded_validation_gate_github_action() {
         .find(|script| script.contains("INPUT_OPERATION"))
         .expect("missing gau execution step");
 
-    assert!(execution_script.contains("case \"$INPUT_OPERATION\" in check|update)"));
+    assert!(execution_script.contains("case \"$INPUT_OPERATION\" in check|update|lint-pins)"));
     assert!(execution_script.contains("case \"$INPUT_MODE\" in latest|latest-tag|latest-hash)"));
     assert!(execution_script.contains("case \"$INPUT_MISSING_REF\" in warn|error|ignore|fallback)"));
     assert!(execution_script.contains("args=(\"--${INPUT_OPERATION}\" \"--${INPUT_MODE}\""));
