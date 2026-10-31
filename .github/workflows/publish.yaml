@@ -209,9 +209,9 @@ jobs:
           - triple: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
           - triple: x86_64-apple-darwin
-            os: macos-latest
+            os: macos-26-intel
           - triple: aarch64-apple-darwin
-            os: macos-latest
+            os: macos-26
           - triple: x86_64-pc-windows-gnu
             os: ubuntu-latest
     runs-on: ${{ matrix.os }}
