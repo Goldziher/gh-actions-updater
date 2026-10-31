@@ -16,5 +16,46 @@ cargo-deny = "0.20.2"
 "github:DevinR528/cargo-sort" = "2.1.4"
 actionlint = "1.7.12"
 
+[tasks.setup]
+description = "Install the toolchain, fetch dependencies and install git hooks"
+run = ["mise install", "cargo fetch", { task = "governance:hooks:install" }]
+
+[tasks.build]
+description = "Build the release binary"
+run = "cargo build --locked --release"
+
+[tasks.test]
+description = "Run the Rust test suite"
+run = "cargo test --locked --all-targets --all-features"
+
+[tasks.lint]
+description = "Run formatting and clippy checks"
+run = ["cargo fmt --all --check", "cargo clippy --locked --all-targets --all-features -- -D warnings"]
+
+[tasks.package]
+description = "Validate Cargo, npm, and Python packages"
+shell = "bash -euo pipefail -c"
+run = [
+  "cargo package --locked",
+  "node --check npm-package/index.js",
+  "node --check npm-package/install.js",
+  "node --check npm-package/bin/gau",
+  "cd npm-package && pnpm install --frozen-lockfile --ignore-scripts && pnpm pack --dry-run",
+  "python3 -m compileall pip-package/gh_actions_updater",
+]
+
+[tasks."governance:generate"]
+description = "Generate native AI governance outputs"
+run = "npx -y ai-rulez@latest generate --no-local --strict-config"
+
+[tasks."governance:check"]
+description = "Validate native AI governance and freshness"
+run = [
+  "npx -y ai-rulez@latest migrate okf --check",
+  "npx -y ai-rulez@latest validate --strict --no-local",
+  "npx -y ai-rulez@latest lock --check",
+  "npx -y ai-rulez@latest generate --check --no-local --strict-config",
+]
+
 [task_config]
 includes = ["mise-tasks", "mise-tasks/shared.toml"]
