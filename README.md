@@ -94,6 +94,7 @@ when you want to scan it anyway.
 | `--github-token <TOKEN>`                        | Use a GitHub token for metadata requests.                                       |
 | `--github-api-url <URL>`                        | Use a GitHub-compatible API endpoint.                                           |
 | `--strict-schema`                               | Treat schema diagnostics as failures.                                           |
+| `--lint-pins`                                   | Offline: fail on every remote ref that is not a bare `vN` major tag.            |
 | `--no-schema-validation`                        | Skip SchemaStore validation.                                                    |
 | `-h, --help`                                    | Print help.                                                                     |
 | `-V, --version`                                 | Print version.                                                                  |
@@ -135,6 +136,7 @@ exclude = []
 include_prereleases = false
 preserve_major = false
 missing_ref = "warn"
+allow_full = []
 
 [output]
 format = "human"
@@ -226,6 +228,33 @@ Deleted or missing refs are controlled by `missing_ref`:
 | `error`    | Treat the missing ref as a failure.                 |
 | `ignore`   | Suppress missing-ref diagnostics.                   |
 | `fallback` | Allow normal update target selection and rewriting. |
+
+## Major-Pin Policy
+
+`gau --lint-pins` enforces "every remote `uses:` ref is a bare `vN` major tag"
+without network access. It reports each SHA, `@vN.N`, `@vN.N.N`, branch, or other
+ref as `path:line: owner/repo@ref: reason`, exits `1` when it finds any, and
+prints a JSON report with `--format json`. Local `./` refs and `docker://` images
+are skipped, and `# gau: ignore` on the `uses:` line exempts a reference.
+
+Some actions publish no major tag. List them in `allow_full` to permit a full
+version tag (never a SHA or branch); entries are globs matched against
+`owner/repo` or `owner/repo/path`:
+
+```toml
+[update]
+allow_full = ["rust-lang/crates-io-auth-action", "octo-org/*"]
+```
+
+To convert a repository, run
+`gau --update --latest-tag --pin-style major .github`. It rewrites SHA pins and
+full tags to the latest major tag, and keeps a full tag when the upstream has no
+major tag; add those actions to `allow_full`.
+
+Recommended setup: enable `gh-actions-updater-lint-pins` (offline, fast) as a
+pre-commit hook, run `gh-actions-updater-major-check` in CI (or as a hook with a
+token) to catch outdated majors, drop the `github-actions` ecosystem from
+Dependabot, and refresh with `gh-actions-updater-major-update`.
 
 ## Cache And Performance
 
@@ -319,17 +348,18 @@ Use the stable `v0` tag as a validation gate:
 Set `operation: update` to rewrite the checkout. The Action never commits or
 pushes changes.
 
-| Input          | Default               | Values or purpose                                                  |
-| -------------- | --------------------- | ------------------------------------------------------------------ |
-| `operation`    | `check`               | `check` validates without writing; `update` rewrites the checkout. |
-| `mode`         | `latest`              | `latest`, `latest-tag`, or `latest-hash`.                          |
-| `path`         | `.`                   | Repository or workspace path to scan.                              |
-| `recursive`    | `false`               | Scan nested repositories and `.github` directories.                |
-| `validate`     | `true`                | Verify remote and local references exist.                          |
-| `missing-ref`  | `error`               | `warn`, `error`, `ignore`, or `fallback`.                          |
-| `version`      | `latest`              | `gau` release version, with or without a `v` prefix.               |
-| `cache`        | `true`                | Cache the installed binary on the runner.                          |
-| `github-token` | `${{ github.token }}` | Token used for release downloads and metadata requests.            |
+| Input          | Default               | Values or purpose                                               |
+| -------------- | --------------------- | --------------------------------------------------------------- |
+| `operation`    | `check`               | `check` validates; `update` rewrites; `lint-pins` runs offline. |
+| `mode`         | `latest`              | `latest`, `latest-tag`, or `latest-hash`.                       |
+| `pin-style`    | `preserve`            | `preserve` (defers to config), `major`, `minor`, or `full`.     |
+| `path`         | `.`                   | Repository or workspace path to scan.                           |
+| `recursive`    | `false`               | Scan nested repositories and `.github` directories.             |
+| `validate`     | `true`                | Verify remote and local references exist.                       |
+| `missing-ref`  | `error`               | `warn`, `error`, `ignore`, or `fallback`.                       |
+| `version`      | `latest`              | `gau` release version, with or without a `v` prefix.            |
+| `cache`        | `true`                | Cache the installed binary on the runner.                       |
+| `github-token` | `${{ github.token }}` | Token used for release downloads and metadata requests.         |
 
 The Action exposes `version` and `install-dir` outputs. Pin the Action to an
 exact release instead of `v0` when immutable workflow dependencies are
@@ -348,48 +378,50 @@ repos:
 The check hook runs `gau --latest --check --validate --missing-ref error`, uses
 the global cache, and never rewrites files. Use `gh-actions-updater-update` for
 the equivalent autofixing hook. The legacy `gh-actions-updater` hook id remains
-an alias for update. Users can override or extend hook arguments for settings
-such as `--cache-ttl 24h`, `--no-cache`, or `--latest-hash`.
+an alias for update. `gh-actions-updater-major-check` and
+`gh-actions-updater-major-update` run `--latest-tag --pin-style major` instead,
+and `gh-actions-updater-lint-pins` runs the offline `--lint-pins` check. Users
+can override or extend hook arguments for settings such as `--cache-ttl 24h`,
+`--no-cache`, or `--latest-hash`.
 
 ## Poly hooks
 
-This repository publishes `gh-actions-updater-check` and
-`gh-actions-updater-update` through `poly-hooks.toml`. A consumer selects them:
+This repository publishes the same hooks as pre-commit through
+`poly-hooks.toml`: `gh-actions-updater-check`, `-update`, `-major-check`,
+`-major-update`, and `-lint-pins`. A consumer selects them:
 
 ```toml
 [[hooks.sources]]
 id = "gh-actions-updater"
 git = "https://github.com/Goldziher/gh-actions-updater.git"
 revision = "v0.3.1"
-hooks = ["gh-actions-updater-check"]
+hooks = ["gh-actions-updater-lint-pins"]
 ```
 
 Choose an execution channel in the uncommitted `poly.local.toml`:
 
 ```toml
 [hook_preferences]
-channels = ["system", "cargo"]
+channels = ["system", "npm", "cargo"]
 ```
 
-The `system` channel uses an installed `gau`; `cargo` installs the catalog's
-pinned package version. Run `poly hooks update` when changing the source revision
-and commit the resulting `poly-hooks.lock`.
+The `system` channel uses an installed `gau`; `npm` runs the catalog's pinned
+version through `npx`; `cargo` installs that version. Run `poly hooks update`
+when changing the source revision and commit the resulting `poly-hooks.lock`.
 
 ## Exit Codes
 
-| Code | Meaning                                                                  |
-| ---- | ------------------------------------------------------------------------ |
-| `0`  | Completed successfully.                                                  |
-| `1`  | `--check` found updates or missing-ref policy requested a check failure. |
-| `2`  | Invalid CLI arguments, config, init, cache setup, or thread setup.       |
-| `3`  | File discovery, parsing, or strict schema validation failed.             |
-| `4`  | Metadata lookup failed and no usable cache entry exists.                 |
-| `5`  | File rewrite failed.                                                     |
+| Code | Meaning                                                                                                        |
+| ---- | -------------------------------------------------------------------------------------------------------------- |
+| `0`  | Completed successfully.                                                                                        |
+| `1`  | `--check` found updates, `--lint-pins` found a non-major ref, or missing-ref policy requested a check failure. |
+| `2`  | Invalid CLI arguments, config, init, cache setup, or thread setup.                                             |
+| `3`  | File discovery, parsing, or strict schema validation failed.                                                   |
+| `4`  | Metadata lookup failed and no usable cache entry exists.                                                       |
+| `5`  | File rewrite failed.                                                                                           |
 
 ## Release
 
 Release automation uses GoReleaser for GitHub archives and Homebrew formula
 generation, with wrapper packages for npm and PyPI. Distribution targets are
 crates.io, GitHub Releases, Homebrew bottles, npm, and PyPI.
-
-Package names stay `gh-actions-updater`. The installed command is `gau`.
