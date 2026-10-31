@@ -1,0 +1,3 @@
+[update]
+# Publishes no v1 major tag; only release/v1 branch and full tags.
+allow_full = ["pypa/gh-action-pypi-publish"]
