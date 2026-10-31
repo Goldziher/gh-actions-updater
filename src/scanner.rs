@@ -175,7 +175,7 @@ fn scan_file(path: &Path, settings: &Settings) -> ScanFileResult {
         }
     };
 
-    let references = match scan_content(path, kind, &content) {
+    let references = match scan_documents(path, kind, &content, settings.lint_pins) {
         Ok(references) => references,
         Err(error) => {
             return ScanFileResult {
@@ -228,21 +228,28 @@ fn classify_file(path: &Path) -> FileKind {
     }
 }
 
+#[cfg(test)]
 fn scan_content(path: &Path, kind: FileKind, content: &str) -> Result<Vec<ReferenceReport>> {
+    scan_documents(path, kind, content, false)
+}
+
+/// Collects `uses:` values from the first YAML document, or from every document
+/// when `all_documents` is set (lint-pins, which must not miss a ref).
+fn scan_documents(path: &Path, kind: FileKind, content: &str, all_documents: bool) -> Result<Vec<ReferenceReport>> {
     if memmem::find(content.as_bytes(), b"uses:").is_none() {
         return Ok(Vec::new());
     }
 
     let docs =
         MarkedYaml::load_from_str(content).with_context(|| format!("failed to parse YAML in {}", path.display()))?;
-    let Some(yaml) = docs.first() else {
-        return Ok(Vec::new());
-    };
+    let document_count = if all_documents { docs.len() } else { docs.len().min(1) };
 
     let mut values = Vec::new();
-    match kind {
-        FileKind::Workflow => collect_workflow_uses(yaml, content, &mut values),
-        FileKind::ActionMetadata => collect_action_metadata_uses(yaml, content, &mut values),
+    for yaml in &docs[..document_count] {
+        match kind {
+            FileKind::Workflow => collect_workflow_uses(yaml, content, &mut values),
+            FileKind::ActionMetadata => collect_action_metadata_uses(yaml, content, &mut values),
+        }
     }
 
     let mut references = Vec::new();

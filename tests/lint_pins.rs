@@ -278,3 +278,39 @@ jobs:
         "stdout: {stdout}"
     );
 }
+
+#[test]
+fn lint_pins_scans_every_yaml_document() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(temp.path().join(".git")).unwrap();
+    write(
+        &temp.path().join(".github/workflows/ci.yml"),
+        r#"on: push
+jobs:
+  first:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+---
+on: push
+jobs:
+  second:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/cache@v4.2.0
+"#,
+    );
+
+    let output = lint_pins(temp.path(), &[]);
+
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains(":13: actions/cache@v4.2.0: full version tag"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("1 pin finding(s) in 2 remote reference(s)"),
+        "stdout: {stdout}"
+    );
+}
