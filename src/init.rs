@@ -25,6 +25,7 @@ exclude = []
 include_prereleases = false
 preserve_major = false
 missing_ref = "warn"
+allow_full = []
 
 [output]
 format = "human"

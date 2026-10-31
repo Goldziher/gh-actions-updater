@@ -1882,6 +1882,8 @@ mod tests {
             threads: None,
             validate: false,
             pin_floating_to_sha: false,
+            lint_pins: false,
+            allow_full: Vec::new(),
         }
     }
 

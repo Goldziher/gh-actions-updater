@@ -114,6 +114,13 @@ pub struct Cli {
         help = "Rewrite branch and non-semver-tag references to the commit SHA they currently point at"
     )]
     pub pin_floating_to_sha: bool,
+
+    #[arg(
+        long = "lint-pins",
+        conflicts_with_all = ["init", "update", "check", "diff", "validate", "pin_floating_to_sha"],
+        help = "Offline: fail on every remote ref that is not a bare vN major tag"
+    )]
+    pub lint_pins: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]

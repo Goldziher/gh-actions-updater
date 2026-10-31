@@ -46,6 +46,8 @@ pub struct Settings {
     pub schema_validation: bool,
     pub validate: bool,
     pub pin_floating_to_sha: bool,
+    pub lint_pins: bool,
+    pub allow_full: Vec<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -92,6 +94,7 @@ struct UpdateConfig {
     preserve_major: Option<bool>,
     pin_style: Option<PinStyle>,
     missing_ref: Option<MissingRefPolicy>,
+    allow_full: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -248,9 +251,11 @@ impl Settings {
                 .or(file_config.github.api_url)
                 .unwrap_or_else(|| "https://api.github.com".to_string()),
             strict_schema: cli.strict_schema,
-            schema_validation: !cli.no_schema_validation,
+            schema_validation: !cli.no_schema_validation && !cli.lint_pins,
             validate: cli.validate,
             pin_floating_to_sha: cli.pin_floating_to_sha,
+            lint_pins: cli.lint_pins,
+            allow_full: file_config.update.allow_full.unwrap_or_default(),
         })
     }
 }

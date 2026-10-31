@@ -4,6 +4,7 @@ mod cli;
 mod config;
 mod discover;
 mod init;
+mod lint_pins;
 mod metadata;
 mod report;
 mod rewrite;
@@ -25,18 +26,9 @@ pub fn run() -> Result<()> {
         return Ok(());
     }
 
-    let settings = match config::Settings::resolve(&cli).context("failed to resolve configuration") {
-        Ok(settings) => settings,
-        Err(error) => {
-            eprintln!("{error:#}");
-            std::process::exit(2);
-        }
-    };
-    if let Some(threads) = settings.threads {
-        if let Err(error) = rayon::ThreadPoolBuilder::new().num_threads(threads).build_global() {
-            eprintln!("failed to configure rayon thread pool: {error}");
-            std::process::exit(2);
-        }
+    let settings = resolve_settings(&cli);
+    if settings.lint_pins {
+        return run_lint_pins(&settings);
     }
     let cache = match cache::CacheState::prepare(&settings).context("failed to prepare cache") {
         Ok(cache) => cache,
@@ -121,5 +113,54 @@ pub fn run() -> Result<()> {
         std::process::exit(exit_code);
     }
 
+    Ok(())
+}
+
+fn resolve_settings(cli: &Cli) -> config::Settings {
+    let settings = match config::Settings::resolve(cli).context("failed to resolve configuration") {
+        Ok(settings) => settings,
+        Err(error) => {
+            eprintln!("{error:#}");
+            std::process::exit(2);
+        }
+    };
+    if let Some(threads) = settings.threads {
+        if let Err(error) = rayon::ThreadPoolBuilder::new().num_threads(threads).build_global() {
+            eprintln!("failed to configure rayon thread pool: {error}");
+            std::process::exit(2);
+        }
+    }
+    settings
+}
+
+fn run_lint_pins(settings: &config::Settings) -> Result<()> {
+    let files = match discover::discover_files(settings).context("failed to discover files") {
+        Ok(files) => files,
+        Err(error) => {
+            eprintln!("{error:#}");
+            std::process::exit(3);
+        }
+    };
+    let scan = match scanner::scan_files(&files, settings).context("failed to scan files") {
+        Ok(scan) => scan,
+        Err(error) => {
+            eprintln!("{error:#}");
+            std::process::exit(3);
+        }
+    };
+    let report = match lint_pins::lint(settings, &scan) {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("{error:#}");
+            std::process::exit(2);
+        }
+    };
+    report.write(settings, &mut io::stdout(), &mut io::stderr())?;
+    if !report.diagnostics.is_empty() {
+        std::process::exit(3);
+    }
+    if !report.findings.is_empty() {
+        std::process::exit(1);
+    }
     Ok(())
 }
