@@ -2,7 +2,7 @@
 version = "5.0"
 name = 'gh-actions-updater'
 gitignore = true
-gitignore_exclude = []
+gitignore_exclude = [".codex/config.toml"]
 default_layers = ["plugins"]
 presets = ["claude", "codex", "opencode", "pi"]
 builtins = ['rust', 'default-commands']
