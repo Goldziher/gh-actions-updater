@@ -117,7 +117,18 @@ pub struct Cli {
 
     #[arg(
         long = "lint-pins",
-        conflicts_with_all = ["init", "update", "check", "diff", "validate", "pin_floating_to_sha"],
+        conflicts_with_all = [
+            "init",
+            "update",
+            "check",
+            "dry_run",
+            "diff",
+            "validate",
+            "latest_hash",
+            "pin_style",
+            "missing_ref",
+            "pin_floating_to_sha",
+        ],
         help = "Offline: fail on every remote ref that is not a bare vN major tag"
     )]
     pub lint_pins: bool,

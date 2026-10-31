@@ -228,9 +228,20 @@ fn lint_pins_rejects_update_flags() {
     let temp = tempfile::tempdir().unwrap();
     bad_fixture(temp.path());
 
-    let output = lint_pins(temp.path(), &["--update"]);
-
-    assert_eq!(output.status.code(), Some(2));
+    for flags in [
+        &["--update"][..],
+        &["--dry-run"],
+        &["--latest-hash"],
+        &["--pin-style", "major"],
+        &["--missing-ref", "error"],
+    ] {
+        let output = lint_pins(temp.path(), flags);
+        assert_eq!(output.status.code(), Some(2), "flags: {flags:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("cannot be used with"),
+            "flags: {flags:?}"
+        );
+    }
 }
 
 #[test]
