@@ -6,6 +6,7 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- Minimum supported versions raised: Node.js 22, Rust 1.99.
 - Python 3.11 is now the minimum supported version; Python 3.10 reached end of life.
 
 ## [0.4.0] - 2026-10-31

@@ -12,7 +12,7 @@ x-ai-rulez:
 
 ### Prerequisites
 
-- Rust 1.85+ with edition 2024 support.
+- Rust 1.99+ with edition 2024 support.
 - Cargo and rustfmt/clippy.
 - mise: `mise install` provides the locked node, pnpm, python, poly and cargo
   tools; `mise run lint|test|build|package` wrap the commands below.
